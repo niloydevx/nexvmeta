@@ -1,402 +1,447 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Upload, Image as ImageIcon, CheckCircle, XCircle, Copy, Sparkles, FileText, ScanEye, Zap, AlertCircle, Download, ShieldCheck, Microscope } from "lucide-react";
+import { 
+  Upload, CheckCircle, XCircle, Copy, Sparkles, FileText, 
+  ScanEye, Download, ShieldCheck, Microscope, Settings, 
+  Trash2, Layers, RefreshCw, ChevronRight, Menu
+} from "lucide-react";
+
+// --- Types ---
+type AnalysisResult = {
+  metadata: { title: string; keywords: { tag: string; score: number }[]; category: number };
+  prompts: { midjourney: string; stableDiffusion: string };
+  review: { 
+    totalScore: number; commercialScore: number; feedback: string;
+    forensicChecklist: { [key: string]: boolean } 
+  };
+};
+
+type FileItem = {
+  id: string;
+  file: File;
+  preview: string;
+  status: "idle" | "processing" | "done" | "error";
+  result: AnalysisResult | null;
+};
 
 // --- Components ---
 
-const Typewriter = ({ text, speed = 5, delay = 0 }: { text: string; speed?: number; delay?: number }) => {
-  const [displayedText, setDisplayedText] = useState("");
-  
+const Typewriter = ({ text, speed = 10 }: { text: string; speed?: number }) => {
+  const [display, setDisplay] = useState("");
   useEffect(() => {
-    setDisplayedText(""); 
     let i = 0;
-    const startTimeout = setTimeout(() => {
-      const timer = setInterval(() => {
-        if (i < text.length) {
-          setDisplayedText((prev) => prev + text.charAt(i));
-          i++;
-        } else {
-          clearInterval(timer);
-        }
-      }, speed);
-      return () => clearInterval(timer);
-    }, delay);
-    return () => clearTimeout(startTimeout);
-  }, [text, speed, delay]);
-
-  return <span>{displayedText}</span>;
+    const timer = setInterval(() => {
+      if (i < text.length) setDisplay(t => t + text.charAt(i++));
+      else clearInterval(timer);
+    }, speed);
+    return () => clearInterval(timer);
+  }, [text, speed]);
+  return <span>{display}</span>;
 };
 
-const ScoreBar = ({ label, score }: { label: string; score: number }) => (
-  <div className="space-y-2">
-    <div className="flex justify-between text-xs font-medium tracking-wide">
-      <span className="text-gray-400 uppercase">{label}</span>
-      <span className={`${score >= 80 ? 'text-emerald-400' : score >= 50 ? 'text-yellow-400' : 'text-red-400'} font-mono`}>
-        {score}%
-      </span>
-    </div>
-    <div className="h-2 bg-gray-800 rounded-full overflow-hidden relative">
-      <motion.div 
-        initial={{ width: 0 }}
-        animate={{ width: `${score}%` }}
-        transition={{ duration: 1.5, ease: "easeOut", delay: 0.2 }}
-        className={`h-full rounded-full shadow-[0_0_10px_rgba(0,0,0,0.5)] ${
-          score >= 85 ? 'bg-linear-to-r from-emerald-500 to-green-400' : 
-          score >= 60 ? 'bg-linear-to-r from-yellow-500 to-orange-400' : 
-          'bg-linear-to-r from-red-500 to-rose-400'
-        }`} 
-      />
-    </div>
-  </div>
-);
+// --- Main Page ---
 
-const ChecklistItem = ({ label, passed }: { label: string; passed: boolean }) => (
-  <div className="flex items-center justify-between p-3 bg-white/5 rounded-lg border border-white/5">
-    <span className="text-sm text-gray-300">{label}</span>
-    {passed ? (
-      <div className="flex items-center gap-1 text-emerald-400 text-xs font-bold uppercase">
-        <CheckCircle size={14} /> Pass
-      </div>
-    ) : (
-      <div className="flex items-center gap-1 text-red-400 text-xs font-bold uppercase">
-        <XCircle size={14} /> Fail
-      </div>
-    )}
-  </div>
-);
+export default function Dashboard() {
+  // State
+  const [queue, setQueue] = useState<FileItem[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [customInstructions, setCustomInstructions] = useState("");
+  const [safetyLevel, setSafetyLevel] = useState("standard");
+  const [isProcessingBatch, setIsProcessingBatch] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-// --- Main Page Component ---
+  // Computed
+  const selectedItem = queue.find(q => q.id === selectedId);
+  const processedCount = queue.filter(q => q.status === "done").length;
 
-export default function Home() {
-  const [image, setImage] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<any>(null);
-  const [activeTab, setActiveTab] = useState("metadata"); 
-  const [imageName, setImageName] = useState("image_001.jpg"); 
+  // --- Handlers ---
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      setImageName(file.name);
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setImage(reader.result as string);
-        setResult(null); 
-      };
-      reader.readAsDataURL(file);
+  const handleUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) {
+      const newFiles = Array.from(e.target.files).map(file => ({
+        id: Math.random().toString(36).substr(2, 9),
+        file,
+        preview: URL.createObjectURL(file),
+        status: "idle" as const,
+        result: null
+      }));
+      setQueue(prev => [...prev, ...newFiles]);
+      if (!selectedId && newFiles.length > 0) setSelectedId(newFiles[0].id);
     }
   };
 
-  const analyzeImage = async () => {
-    if (!image) return;
-    setLoading(true);
-    setResult(null);
+  const processQueue = async () => {
+    setIsProcessingBatch(true);
+    const pending = queue.filter(q => q.status === "idle");
     
-    try {
-      const res = await fetch("/api/analyze", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ image }),
-      });
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
+    for (const item of pending) {
+      // Update status to processing
+      setQueue(prev => prev.map(q => q.id === item.id ? { ...q, status: "processing" } : q));
       
-      setTimeout(() => {
-        setResult(data);
-        setLoading(false);
-      }, 1500); 
-    } catch (error) {
-      alert("Analysis failed. Try again.");
-      setLoading(false);
+      try {
+        // Convert blob to base64
+        const reader = new FileReader();
+        const base64Promise = new Promise<string>((resolve) => {
+          reader.onload = () => resolve(reader.result as string);
+          reader.readAsDataURL(item.file);
+        });
+        const base64 = await base64Promise;
+
+        const res = await fetch("/api/analyze", {
+          method: "POST",
+          body: JSON.stringify({ image: base64, customInstructions, safetyLevel }),
+        });
+        
+        const data = await res.json();
+        if (data.error) throw new Error("API Error");
+
+        setQueue(prev => prev.map(q => q.id === item.id ? { ...q, status: "done", result: data } : q));
+      } catch (err) {
+        setQueue(prev => prev.map(q => q.id === item.id ? { ...q, status: "error" } : q));
+      }
     }
+    setIsProcessingBatch(false);
   };
 
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
-  };
+  const exportAllCSV = () => {
+    const completed = queue.filter(q => q.status === "done" && q.result);
+    if (completed.length === 0) return alert("No completed files to export.");
 
-  const downloadCSV = () => {
-    if (!result) return;
-    const headers = ["Filename", "Title", "Keywords", "Category", "Releases"];
-    const title = `"${result.metadata.title.replace(/"/g, '""')}"`; 
-    const keywords = `"${result.metadata.keywords.map((k: any) => k.tag).join(", ")}"`;
-    const category = result.metadata.category || 7;
-    const row = [imageName, title, keywords, category, ""];
-    const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), row.join(",")].join("\n");
-    const encodedUri = encodeURI(csvContent);
+    const headers = ["Filename", "Title", "Keywords", "Commercial Score", "Category"];
+    const rows = completed.map(item => {
+      const r = item.result!;
+      return [
+        `"${item.file.name}"`,
+        `"${r.metadata.title.replace(/"/g, '""')}"`,
+        `"${r.metadata.keywords.map(k => k.tag).join(", ")}"`,
+        r.review.commercialScore,
+        r.metadata.category
+      ].join(",");
+    });
+
+    const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows].join("\n");
     const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
-    link.setAttribute("download", `adobe_stock_${imageName.split('.')[0]}.csv`);
-    document.body.appendChild(link);
+    link.href = encodeURI(csvContent);
+    link.download = `nexvmeta_batch_export_${new Date().toISOString().slice(0,10)}.csv`;
     link.click();
-    document.body.removeChild(link);
+  };
+
+  const removeFile = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setQueue(prev => prev.filter(q => q.id !== id));
+    if (selectedId === id) setSelectedId(null);
   };
 
   return (
-    <div className="min-h-screen bg-[#05050a] text-white font-sans selection:bg-blue-500/30 flex flex-col items-center py-10 px-4">
+    <div className="h-screen bg-[#05050a] text-white font-sans flex overflow-hidden">
       
-      <motion.header 
-        initial={{ y: -20, opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-        className="mb-10 text-center space-y-2"
-      >
-        <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-bold tracking-wider uppercase mb-2">
-          <ShieldCheck size={12} /> Adobe Stock 2026 Compliant
+      {/* --- SIDEBAR: Batch Manager --- */}
+      <aside className="w-80 bg-[#0a0a12] border-r border-gray-800 flex flex-col z-20">
+        <div className="p-5 border-b border-gray-800 flex items-center justify-between">
+           <div>
+             <h1 className="font-bold text-xl tracking-tight">NexV<span className="text-blue-500">meta</span></h1>
+             <p className="text-xs text-gray-500">Batch Workspace</p>
+           </div>
+           <button onClick={() => setIsSettingsOpen(true)} className="p-2 hover:bg-gray-800 rounded-lg text-gray-400 hover:text-white transition">
+             <Settings size={18} />
+           </button>
         </div>
-        <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight">
-          <span className="bg-clip-text text-transparent bg-linear-to-b from-white to-gray-400">NexV</span>
-          <span className="text-blue-500">meta</span>
-        </h1>
-        <p className="text-gray-500 text-sm md:text-base">Forensic Analysis & 8K Prompt Generator.</p>
-      </motion.header>
 
-      <main className="w-full max-w-5xl grid grid-cols-1 md:grid-cols-2 gap-8 items-start">
-        
-        {/* Left Column */}
-        <motion.div 
-          layout
-          className="bg-[#0f0f16] border border-gray-800 rounded-3xl p-2 shadow-2xl relative overflow-hidden"
-        >
-          <div className="relative rounded-2xl overflow-hidden bg-black/50 min-h-75 flex items-center justify-center border border-gray-800/50 group">
-            <div className="absolute inset-0 bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-size-[24px_24px]"></div>
+        {/* Upload Area */}
+        <div className="p-4">
+          <input 
+            type="file" 
+            multiple 
+            ref={fileInputRef} 
+            className="hidden" 
+            onChange={handleUpload} 
+            accept="image/*"
+          />
+          <button 
+            onClick={() => fileInputRef.current?.click()}
+            className="w-full py-8 border-2 border-dashed border-gray-800 hover:border-blue-500 hover:bg-blue-500/5 rounded-xl transition-all flex flex-col items-center justify-center gap-2 group"
+          >
+            <div className="p-3 bg-gray-900 rounded-full group-hover:scale-110 transition-transform">
+              <Upload size={20} className="text-blue-400" />
+            </div>
+            <span className="text-sm font-medium text-gray-400">Add Images (Bulk)</span>
+          </button>
+        </div>
 
-            {!image ? (
-              <label className="relative z-10 flex flex-col items-center gap-4 cursor-pointer p-8 w-full h-full transition-transform duration-300 hover:scale-[1.02]">
-                <div className="w-16 h-16 rounded-2xl bg-linear-to-br from-blue-600 to-violet-600 flex items-center justify-center shadow-lg shadow-blue-500/20 group-hover:shadow-blue-500/40 transition-all">
-                  <Upload className="text-white" size={28} />
-                </div>
-                <div className="text-center">
-                  <h3 className="text-lg font-semibold text-white">Upload Design</h3>
-                  <p className="text-sm text-gray-400">JPG/PNG (Forensic Scan Mode)</p>
-                </div>
-                <input type="file" className="hidden" accept="image/*" onChange={handleImageUpload} />
-              </label>
-            ) : (
-              <>
-                <img src={image} alt="Preview" className="w-full h-auto object-cover opacity-90" />
-                
-                {loading && (
-                  <motion.div 
-                    initial={{ top: "0%" }}
-                    animate={{ top: "100%" }}
-                    transition={{ repeat: Infinity, duration: 1.5, ease: "linear" }}
-                    className="absolute left-0 w-full h-1 bg-blue-500/80 shadow-[0_0_20px_rgba(59,130,246,0.8)] z-20"
-                  />
-                )}
-                
-                {!loading && (
-                  <button 
-                    onClick={() => { setImage(null); setResult(null); }} 
-                    className="absolute top-3 right-3 bg-black/50 hover:bg-red-500/80 backdrop-blur-md p-2 rounded-full text-white transition-all border border-white/10"
-                  >
-                    <XCircle size={18} />
-                  </button>
-                )}
-              </>
-            )}
-          </div>
-
-          {image && !loading && !result && (
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="p-4">
-              <button
-                onClick={analyzeImage}
-                className="w-full bg-white text-black hover:bg-blue-50 py-3.5 rounded-xl font-bold text-base transition-all flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(255,255,255,0.1)]"
-              >
-                <Microscope size={18} className="text-blue-600" /> Start Forensic Scan
-              </button>
-            </motion.div>
+        {/* File List */}
+        <div className="flex-1 overflow-y-auto custom-scrollbar px-2 space-y-1">
+          {queue.length === 0 && (
+             <div className="text-center text-gray-600 py-10 text-xs">No files in queue</div>
           )}
+          {queue.map(item => (
+            <div 
+              key={item.id}
+              onClick={() => setSelectedId(item.id)}
+              className={`flex items-center gap-3 p-2.5 rounded-lg cursor-pointer transition-all group relative ${
+                selectedId === item.id ? "bg-blue-600/10 border border-blue-500/30" : "hover:bg-white/5 border border-transparent"
+              }`}
+            >
+              <img src={item.preview} className="w-10 h-10 rounded object-cover bg-gray-800" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium truncate text-gray-200">{item.file.name}</p>
+                <div className="flex items-center gap-2 text-[10px] uppercase tracking-wide">
+                  {item.status === "idle" && <span className="text-gray-500">Queued</span>}
+                  {item.status === "processing" && <span className="text-blue-400 animate-pulse">Scanning...</span>}
+                  {item.status === "done" && <span className="text-emerald-400">Complete</span>}
+                  {item.status === "error" && <span className="text-red-400">Failed</span>}
+                </div>
+              </div>
+              <button onClick={(e) => removeFile(item.id, e)} className="opacity-0 group-hover:opacity-100 p-1.5 hover:bg-red-500/20 text-gray-500 hover:text-red-400 rounded transition-all">
+                <Trash2 size={14} />
+              </button>
+            </div>
+          ))}
+        </div>
 
-          {loading && (
-             <div className="p-6 text-center">
-               <div className="flex items-center justify-center gap-2 text-blue-400 font-mono text-sm animate-pulse">
-                 <ScanEye size={16} /> SCANNING PIXEL DATA...
+        {/* Action Bar */}
+        <div className="p-4 border-t border-gray-800 bg-[#0a0a12]">
+          <div className="flex gap-2 mb-3 text-xs text-gray-500">
+             <div className="flex-1 bg-gray-800 h-1 rounded-full overflow-hidden">
+                <div className="bg-blue-500 h-full transition-all duration-500" style={{ width: `${queue.length ? (processedCount / queue.length) * 100 : 0}%` }}></div>
+             </div>
+             <span>{processedCount}/{queue.length}</span>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <button 
+              onClick={processQueue}
+              disabled={isProcessingBatch || queue.every(q => q.status === "done")}
+              className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white py-2.5 rounded-lg text-sm font-bold flex items-center justify-center gap-2 transition"
+            >
+              {isProcessingBatch ? <RefreshCw size={16} className="animate-spin" /> : <ScanEye size={16} />}
+              {isProcessingBatch ? "Processing..." : "Run Batch"}
+            </button>
+            <button 
+              onClick={exportAllCSV}
+              disabled={processedCount === 0}
+              className="bg-gray-800 hover:bg-gray-700 disabled:opacity-50 text-white py-2.5 rounded-lg text-sm font-bold flex items-center justify-center gap-2 transition"
+            >
+              <Download size={16} /> Export CSV
+            </button>
+          </div>
+        </div>
+      </aside>
+
+      {/* --- MAIN CONTENT: Detail View --- */}
+      <main className="flex-1 bg-[#05050a] flex flex-col relative overflow-hidden">
+        {selectedItem ? (
+          <div className="h-full flex flex-col md:flex-row">
+            
+            {/* Image Preview (Left/Top) */}
+            <div className="flex-1 bg-[#020205] flex items-center justify-center p-8 relative overflow-hidden">
+               <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-blue-900/10 via-transparent to-transparent opacity-50"></div>
+               <img 
+                 src={selectedItem.preview} 
+                 className="max-h-full max-w-full object-contain shadow-2xl rounded-lg border border-gray-800 z-10" 
+               />
+               <div className="absolute bottom-4 right-4 z-20 flex gap-2">
+                 <div className="bg-black/60 backdrop-blur text-white px-3 py-1 rounded-full text-xs font-mono border border-white/10">
+                   {(selectedItem.file.size / 1024 / 1024).toFixed(2)} MB
+                 </div>
+               </div>
+            </div>
+
+            {/* Analysis Results (Right/Bottom) */}
+            <div className="w-full md:w-125 bg-[#0f0f16] border-l border-gray-800 flex flex-col h-full overflow-hidden">
+              {selectedItem.status === "done" && selectedItem.result ? (
+                <ResultsPanel result={selectedItem.result} />
+              ) : (
+                <EmptyState status={selectedItem.status} />
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="h-full flex flex-col items-center justify-center text-gray-500">
+            <Layers size={48} className="mb-4 opacity-20" />
+            <p>Select an image from the queue to view details.</p>
+          </div>
+        )}
+      </main>
+
+      {/* --- MODAL: Settings --- */}
+      <AnimatePresence>
+        {isSettingsOpen && (
+          <motion.div 
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+          >
+            <motion.div 
+              initial={{ scale: 0.95 }} animate={{ scale: 1 }} exit={{ scale: 0.95 }}
+              className="bg-[#15151e] border border-gray-700 w-full max-w-md rounded-2xl shadow-2xl overflow-hidden"
+            >
+              <div className="p-6 border-b border-gray-700 flex justify-between items-center">
+                <h2 className="text-xl font-bold flex items-center gap-2"><Settings size={20} className="text-blue-500"/> Power Tools</h2>
+                <button onClick={() => setIsSettingsOpen(false)}><XCircle className="text-gray-400 hover:text-white" /></button>
+              </div>
+              <div className="p-6 space-y-6">
+                
+                {/* Custom Instructions */}
+                <div>
+                   <label className="text-sm font-semibold text-gray-300 mb-2 block">Custom AI Instructions</label>
+                   <textarea 
+                     value={customInstructions}
+                     onChange={(e) => setCustomInstructions(e.target.value)}
+                     placeholder="E.g., 'Focus on cinematic lighting', 'Always add the keyword: minimal'"
+                     className="w-full bg-black/30 border border-gray-700 rounded-lg p-3 text-sm text-white focus:border-blue-500 outline-none h-24 resize-none"
+                   />
+                </div>
+
+                {/* Safety Toggle */}
+                <div>
+                   <label className="text-sm font-semibold text-gray-300 mb-2 block">Safety Filter Level</label>
+                   <div className="grid grid-cols-2 gap-2">
+                     <button 
+                       onClick={() => setSafetyLevel("standard")}
+                       className={`p-3 rounded-lg text-sm border ${safetyLevel === "standard" ? "bg-blue-600/20 border-blue-500 text-blue-400" : "bg-black/30 border-gray-700 text-gray-500"}`}
+                     >
+                       Standard
+                     </button>
+                     <button 
+                       onClick={() => setSafetyLevel("strict")}
+                       className={`p-3 rounded-lg text-sm border ${safetyLevel === "strict" ? "bg-emerald-600/20 border-emerald-500 text-emerald-400" : "bg-black/30 border-gray-700 text-gray-500"}`}
+                     >
+                       Strict Mode
+                     </button>
+                   </div>
+                </div>
+
+              </div>
+              <div className="p-4 bg-[#0a0a10] text-center">
+                 <p className="text-xs text-gray-500">Changes apply to next batch run.</p>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+// --- Sub-Components ---
+
+function ResultsPanel({ result }: { result: AnalysisResult }) {
+  const [tab, setTab] = useState("meta");
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* Tabs */}
+      <div className="flex border-b border-gray-800 bg-[#0a0a12]">
+        {[{id:"meta", label:"Metadata", icon:FileText}, {id:"forensic", label:"Forensic", icon:Microscope}, {id:"prompts", label:"Prompts", icon:Sparkles}].map(t => (
+          <button 
+            key={t.id} 
+            onClick={() => setTab(t.id)}
+            className={`flex-1 py-4 text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 transition-colors ${tab === t.id ? "text-blue-400 bg-[#15151e] border-b-2 border-blue-500" : "text-gray-500 hover:text-white"}`}
+          >
+            <t.icon size={14} /> {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Content */}
+      <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar">
+        
+        {tab === "meta" && (
+          <div className="space-y-6">
+             <div className="space-y-2">
+               <h3 className="text-gray-500 text-xs font-bold uppercase">Title</h3>
+               <div className="p-3 bg-white/5 border border-white/10 rounded-lg text-sm leading-relaxed">{result.metadata.title}</div>
+             </div>
+             <div className="space-y-2">
+               <div className="flex justify-between">
+                 <h3 className="text-gray-500 text-xs font-bold uppercase">Keywords</h3>
+                 <span className="text-xs text-gray-500">{result.metadata.keywords.length} tags</span>
+               </div>
+               <div className="flex flex-wrap gap-2">
+                 {result.metadata.keywords.map((k, i) => (
+                   <span key={i} className={`px-2 py-1 text-xs rounded border ${k.score > 80 ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300' : 'bg-white/5 border-white/10 text-gray-400'}`}>
+                     {k.tag}
+                   </span>
+                 ))}
                </div>
              </div>
-          )}
-        </motion.div>
+          </div>
+        )}
 
-        {/* Right Column */}
-        <div className="min-h-100">
-          <AnimatePresence mode="wait">
-            {result ? (
-              <motion.div 
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -20 }}
-                transition={{ duration: 0.5 }}
-                className="bg-[#0f0f16] border border-gray-800 rounded-3xl overflow-hidden shadow-2xl flex flex-col h-full"
-              >
-                <div className="flex bg-[#0a0a12] border-b border-gray-800 p-1">
-                  {[
-                    { id: "metadata", label: "Metadata", icon: FileText },
-                    { id: "review", label: "Forensic", icon: Microscope },
-                    { id: "prompts", label: "8K Prompts", icon: ImageIcon },
-                  ].map((tab) => (
-                    <button
-                      key={tab.id}
-                      onClick={() => setActiveTab(tab.id)}
-                      className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold transition-all relative overflow-hidden ${
-                        activeTab === tab.id 
-                          ? "bg-[#1a1a24] text-white shadow-lg" 
-                          : "text-gray-500 hover:text-gray-300 hover:bg-white/5"
-                      }`}
-                    >
-                      <tab.icon size={16} />
-                      {tab.label}
-                      {activeTab === tab.id && (
-                        <motion.div layoutId="activeTab" className="absolute bottom-0 h-0.5 w-8 bg-blue-500 rounded-full" />
-                      )}
-                    </button>
-                  ))}
-                </div>
+        {tab === "forensic" && (
+          <div className="space-y-6">
+             <div className="flex items-center gap-4 p-4 bg-white/5 rounded-xl border border-white/10">
+               <div className={`text-3xl font-bold ${result.review.totalScore >= 80 ? "text-emerald-400" : "text-yellow-400"}`}>
+                 {result.review.totalScore}
+               </div>
+               <div className="text-sm text-gray-400 leading-tight">
+                 Overall Forensic<br/>Quality Score
+               </div>
+             </div>
+             <div className="space-y-2">
+                {Object.entries(result.review.forensicChecklist).map(([key, val]) => (
+                  <div key={key} className="flex justify-between text-sm py-2 border-b border-white/5">
+                    <span className="text-gray-300 capitalize">{key.replace(/([A-Z])/g, ' $1').trim()}</span>
+                    {val ? <CheckCircle size={16} className="text-emerald-500" /> : <XCircle size={16} className="text-red-500" />}
+                  </div>
+                ))}
+             </div>
+             <p className="text-sm text-gray-400 italic border-l-2 border-blue-500 pl-3">"{result.review.feedback}"</p>
+          </div>
+        )}
 
-                <div className="p-6 flex-1 bg-linear-to-b from-[#0f0f16] to-[#0a0a0f]">
-                  
-                  {/* TAB 1: Metadata */}
-                  {activeTab === "metadata" && (
-                    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
-                      <div>
-                        <div className="flex justify-between items-center mb-2">
-                           <h3 className="text-gray-500 text-xs font-bold uppercase tracking-widest">Adobe Title</h3>
-                           <span className="text-xs text-emerald-500 font-mono">{result.metadata.title.length}/70 chars</span>
-                        </div>
-                        <div className="p-3 bg-black/40 rounded-xl border border-gray-800 text-white font-medium">
-                          <Typewriter text={result.metadata.title} speed={20} />
-                        </div>
-                      </div>
-                      
-                      <div>
-                        <div className="flex justify-between items-center mb-3">
-                            <h3 className="text-gray-500 text-xs font-bold uppercase tracking-widest">Scored Keywords</h3>
-                            <span className="text-xs text-gray-400 font-mono">{result.metadata.keywords.length}/49 tags</span>
-                        </div>
-                        <div className="flex flex-wrap gap-2 max-h-60 overflow-y-auto custom-scrollbar">
-                          {result.metadata.keywords.map((item: any, i: number) => {
-                             let badgeStyle = "bg-[#1a1a24] border-gray-800 text-gray-400"; 
-                             if (item.score >= 90) badgeStyle = "bg-emerald-900/20 border-emerald-500/40 text-emerald-300";
-                             else if (item.score >= 70) badgeStyle = "bg-blue-900/20 border-blue-500/40 text-blue-300";
-                             
-                             return (
-                              <motion.div 
-                                initial={{ opacity: 0, scale: 0.8 }}
-                                animate={{ opacity: 1, scale: 1 }}
-                                transition={{ delay: i * 0.02 }}
-                                key={i} 
-                                className={`px-3 py-1.5 text-xs font-medium rounded-lg border cursor-default flex items-center gap-2 ${badgeStyle}`}
-                              >
-                                {item.tag}
-                                <span className="opacity-60 text-[10px] border-l border-white/10 pl-2">{item.score}%</span>
-                              </motion.div>
-                            )
-                          })}
-                        </div>
-                      </div>
+        {tab === "prompts" && (
+          <div className="space-y-4">
+            <div className="space-y-2">
+               <h3 className="text-xs text-purple-400 font-bold uppercase">Midjourney v6</h3>
+               <div className="p-3 bg-purple-900/10 border border-purple-500/20 rounded-lg text-xs font-mono text-purple-200">
+                 {result.prompts.midjourney}
+               </div>
+            </div>
+            <div className="space-y-2">
+               <h3 className="text-xs text-orange-400 font-bold uppercase">Stable Diffusion XL</h3>
+               <div className="p-3 bg-orange-900/10 border border-orange-500/20 rounded-lg text-xs font-mono text-orange-200">
+                 {result.prompts.stableDiffusion}
+               </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
-                      <div className="pt-4 border-t border-gray-800">
-                          <button 
-                            onClick={downloadCSV}
-                            className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-xl font-bold transition-all flex items-center justify-center gap-2 shadow-lg shadow-emerald-900/20"
-                          >
-                            <Download size={18} /> Download CSV for Adobe
-                          </button>
-                      </div>
-                    </motion.div>
-                  )}
-
-                  {/* TAB 2: Forensic Review */}
-                  {activeTab === "review" && (
-                    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
-                      <div className={`flex items-center justify-between p-6 rounded-2xl border ${
-                          result.review.totalScore > 80 ? 'bg-emerald-900/10 border-emerald-500/20' : 'bg-red-900/10 border-red-500/20'
-                        }`}>
-                        <div>
-                          <div className="text-4xl font-bold text-white tracking-tighter">
-                            {result.review.totalScore}<span className="text-xl text-gray-500 font-normal">/100</span>
-                          </div>
-                          <span className={`text-xs font-bold uppercase tracking-wider mt-1 block ${
-                              result.review.totalScore > 80 ? 'text-emerald-400' : 'text-red-400'
-                          }`}>
-                            {result.review.totalScore > 80 ? 'Ready for Upload' : 'Critical Issues'}
-                          </span>
-                        </div>
-                        <div className="relative w-14 h-14 flex items-center justify-center">
-                          {result.review.totalScore > 80 ? <CheckCircle size={32} className="text-emerald-500" /> : <AlertCircle size={32} className="text-red-500" />}
-                        </div>
-                      </div>
-
-                      {/* Forensic Checklist */}
-                      <div className="space-y-3">
-                         <h4 className="text-xs text-gray-500 uppercase font-bold tracking-widest">Forensic Checklist</h4>
-                         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                            <ChecklistItem label="Focus / Sharpness" passed={result.review.forensicChecklist.isFocusSharp} />
-                            <ChecklistItem label="Lighting Consistency" passed={result.review.forensicChecklist.isLightingNatural} />
-                            <ChecklistItem label="No Artifacts/Noise" passed={result.review.forensicChecklist.noArtifactsDetected} />
-                            <ChecklistItem label="No Chromatic Aberration" passed={result.review.forensicChecklist.noChromeAberration} />
-                            <ChecklistItem label="Anatomy (Hands/Limbs)" passed={result.review.forensicChecklist.handsAndLimbsNormal} />
-                            <ChecklistItem label="Text Clean/Absent" passed={result.review.forensicChecklist.textIsReadableOrAbsent} />
-                         </div>
-                      </div>
-
-                      <div className="grid grid-cols-1 gap-5 pt-4">
-                        <ScoreBar label="Commercial Viability" score={result.review.commercialScore} />
-                      </div>
-                      
-                      <div className="mt-4 pt-4 border-t border-gray-800">
-                        <p className="text-gray-300 text-sm leading-relaxed italic border-l-2 border-blue-500 pl-4">
-                          "<Typewriter text={result.review.feedback} speed={10} delay={500} />"
-                        </p>
-                      </div>
-                    </motion.div>
-                  )}
-
-                  {/* TAB 3: Prompts */}
-                  {activeTab === "prompts" && (
-                     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
-                        <div className="p-3 bg-blue-900/20 border border-blue-500/30 rounded-lg text-xs text-blue-200 mb-4 flex gap-2">
-                           <Sparkles size={16} />
-                           <span>Prompts auto-enhanced for 8K, HDR & Photorealism.</span>
-                        </div>
-                        {Object.entries(result.prompts).map(([key, val]: any, index) => (
-                          <div key={key} className="group relative">
-                            <div className="flex items-center gap-2 mb-2">
-                              <span className="text-xs font-bold text-gray-500 uppercase tracking-widest">{key}</span>
-                              <div className="h-px flex-1 bg-gray-800"></div>
-                            </div>
-                            <div className="bg-black/40 p-4 rounded-xl border border-gray-800 group-hover:border-blue-500/30 transition-colors relative">
-                              <p className="text-gray-300 text-sm font-mono leading-relaxed whitespace-pre-wrap">
-                                <Typewriter text={val} speed={3} delay={index * 200} />
-                              </p>
-                              <button 
-                                onClick={() => copyToClipboard(val)} 
-                                className="absolute top-2 right-2 bg-gray-800 p-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity hover:bg-white hover:text-black"
-                              >
-                                <Copy size={14} />
-                              </button>
-                            </div>
-                          </div>
-                        ))}
-                     </motion.div>
-                  )}
-
-                </div>
-              </motion.div>
-            ) : (
-              // Empty State
-              <div className="h-full flex flex-col items-center justify-center text-center p-8 border border-dashed border-gray-800 rounded-3xl bg-white/5 opacity-50">
-                 <div className="w-16 h-16 bg-gray-800 rounded-full flex items-center justify-center mb-4 text-gray-600">
-                    <Microscope size={32} />
-                 </div>
-                 <h3 className="text-gray-300 font-medium">Forensic Mode Ready</h3>
-                 <p className="text-sm text-gray-500 mt-2 max-w-xs">Upload to start pixel-level forensic analysis and 8K prompt generation.</p>
-              </div>
-            )}
-          </AnimatePresence>
-        </div>
-
-      </main>
+function EmptyState({ status }: { status: string }) {
+  return (
+    <div className="flex-1 flex flex-col items-center justify-center p-8 text-center space-y-4">
+       {status === "idle" && (
+         <>
+           <div className="w-16 h-16 rounded-full bg-gray-800 flex items-center justify-center text-gray-500">
+             <ScanEye size={24} />
+           </div>
+           <div>
+             <h3 className="text-white font-medium">Ready to Scan</h3>
+             <p className="text-gray-500 text-sm mt-1">Click "Run Batch" to start analysis.</p>
+           </div>
+         </>
+       )}
+       {status === "processing" && (
+         <>
+           <div className="relative w-16 h-16 flex items-center justify-center">
+              <div className="absolute inset-0 border-4 border-blue-500/30 rounded-full animate-ping"></div>
+              <Microscope size={24} className="text-blue-400 relative z-10" />
+           </div>
+           <h3 className="text-blue-400 font-medium animate-pulse">Analyzing Pixels...</h3>
+         </>
+       )}
+       {status === "error" && (
+         <>
+           <XCircle size={48} className="text-red-500 mb-2" />
+           <h3 className="text-red-400 font-medium">Analysis Failed</h3>
+           <p className="text-gray-600 text-sm">Please try removing and re-adding this file.</p>
+         </>
+       )}
     </div>
   );
 }
