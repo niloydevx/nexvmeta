@@ -1,11 +1,11 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { NextResponse } from "next/server";
 
-// 1. INCREASE UPLOAD LIMIT TO 20MB
+// INCREASE LIMIT FOR 8K IMAGES
 export const config = {
   api: {
     bodyParser: {
-      sizeLimit: '30mb',
+      sizeLimit: '40mb',
     },
   },
 };
@@ -14,39 +14,42 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 
 export async function POST(req: Request) {
   try {
-    const { 
-      image, 
-      settings 
-    } = await req.json();
-
+    const { image, settings } = await req.json();
     const base64Data = image.replace(/^data:image\/\w+;base64,/, "");
     
-    // Use Gemini 1.5 Pro for best reasoning
+    // USE GEMINI 1.5 PRO (Strongest Logic)
     const model = genAI.getGenerativeModel({ 
       model: "gemini-2.5-pro",
       generationConfig: { responseMimeType: "application/json" }
     });
 
+    // RESOLUTION LOGIC
+    const resolutionPrompt = settings.resolution === "8K" 
+      ? "EXTREME DETAIL: 8k, UHD, highly detailed, sharp focus, ray tracing, unreal engine 5 render, best quality."
+      : "HIGH QUALITY: 4k, photorealistic, balanced lighting, commercial quality.";
+
     const prompt = `
-      ROLE: ADOBE STOCK EXPERT & METADATA SPECIALIST.
+      ROLE: ELITE STOCK PHOTOGRAPHY CURATOR & PROMPT ENGINEER.
       
-      USER SETTINGS (STRICTLY FOLLOW THESE RANGES):
-      - Platform: ${settings.platform} (Optimize for this algorithm)
-      - Title Length: Between ${settings.titleMin} and ${settings.titleMax} characters.
-      - Description Length: Between ${settings.descMin} and ${settings.descMax} characters.
-      - Keyword Count: Exactly ${settings.keywordMax} tags (Minimum ${settings.keywordMin}).
-      
-      TASK 1: GENERATE METADATA
-      - Title: Punchy, SEO-heavy, no filler words.
-      - Keywords: Sorted by relevance.
-      - Description: Detailed sentence for SEO.
+      USER SETTINGS:
+      - Platform: ${settings.platform}
+      - Title Length: ${settings.titleMin}-${settings.titleMax} chars.
+      - Keyword Count: ${settings.keywordMin}-${settings.keywordMax} tags.
+      - Upscale Target: ${settings.resolution} (${resolutionPrompt})
 
-      TASK 2: FORENSIC & TECHNICAL
-      - Analyze for AI artifacts, noise, and upscaling errors.
-      
-      TASK 3: PROMPTS (8K)
-      - Create a prompt to recreate this image.
+      TASK 1: METADATA (SEO OPTIMIZED)
+      - Title: Punchy, descriptive, commercial.
+      - Keywords: Ranked by search volume.
+      - Description: Full sentences including variations of the subject.
 
+      TASK 2: TECHNICAL FORENSICS
+      - Analyze for: Noise, Compression, AI Artifacts.
+      - Score: 0-100 (Commercial Standard).
+
+      TASK 3: UPSCALE/GENERATION PROMPT
+      - Write a prompt specifically for "MagnificAI" or "Midjourney" to upscale this image.
+      - MUST INCLUDE: "${resolutionPrompt}"
+      
       RETURN JSON:
       {
         "meta": {
@@ -56,10 +59,11 @@ export async function POST(req: Request) {
           "category": "number"
         },
         "technical": {
-          "quality_score": number (0-100),
+          "quality_score": number,
           "notes": "string"
         },
         "prompts": {
+          "upscale_prompt": "string",
           "midjourney": "string"
         }
       }
@@ -73,6 +77,6 @@ export async function POST(req: Request) {
     return NextResponse.json(JSON.parse(result.response.text()));
   } catch (error) {
     console.error("API Error:", error);
-    return NextResponse.json({ error: "File too large or AI busy" }, { status: 500 });
+    return NextResponse.json({ error: "Analysis Failed" }, { status: 500 });
   }
 }
