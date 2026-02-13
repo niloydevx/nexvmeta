@@ -1,33 +1,66 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { NextResponse } from "next/server";
 
+// 1. INCREASE UPLOAD LIMIT TO 20MB
+export const config = {
+  api: {
+    bodyParser: {
+      sizeLimit: '30mb',
+    },
+  },
+};
+
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 
 export async function POST(req: Request) {
   try {
-    const { image } = await req.json();
+    const { 
+      image, 
+      settings 
+    } = await req.json();
+
     const base64Data = image.replace(/^data:image\/\w+;base64,/, "");
-    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+    
+    // Use Gemini 1.5 Pro for best reasoning
+    const model = genAI.getGenerativeModel({ 
+      model: "gemini-2.5-pro",
+      generationConfig: { responseMimeType: "application/json" }
+    });
 
     const prompt = `
-      Act as an AI Image Expert. Analyze this image and return a STRICT JSON object:
+      ROLE: ADOBE STOCK EXPERT & METADATA SPECIALIST.
+      
+      USER SETTINGS (STRICTLY FOLLOW THESE RANGES):
+      - Platform: ${settings.platform} (Optimize for this algorithm)
+      - Title Length: Between ${settings.titleMin} and ${settings.titleMax} characters.
+      - Description Length: Between ${settings.descMin} and ${settings.descMax} characters.
+      - Keyword Count: Exactly ${settings.keywordMax} tags (Minimum ${settings.keywordMin}).
+      
+      TASK 1: GENERATE METADATA
+      - Title: Punchy, SEO-heavy, no filler words.
+      - Keywords: Sorted by relevance.
+      - Description: Detailed sentence for SEO.
+
+      TASK 2: FORENSIC & TECHNICAL
+      - Analyze for AI artifacts, noise, and upscaling errors.
+      
+      TASK 3: PROMPTS (8K)
+      - Create a prompt to recreate this image.
+
+      RETURN JSON:
       {
+        "meta": {
+          "title": "string",
+          "description": "string",
+          "keywords": [{ "tag": "string" }],
+          "category": "number"
+        },
+        "technical": {
+          "quality_score": number (0-100),
+          "notes": "string"
+        },
         "prompts": {
-          "midjourney": "string (include --v 6 --ar 16:9)",
-          "dalle": "string (descriptive)",
-          "stableDiffusion": "string (comma separated tags)"
-        },
-        "metadata": {
-          "title": "string (Catchy Title)",
-          "keywords": ["tag1", "tag2", ... (15 tags)]
-        },
-        "review": {
-          "totalScore": number (0-100),
-          "resolutionScore": number (0-100),
-          "noiseScore": number (0-100),
-          "compositionScore": number (0-100),
-          "commercialScore": number (0-100),
-          "feedback": "string (short critique)"
+          "midjourney": "string"
         }
       }
     `;
@@ -37,12 +70,9 @@ export async function POST(req: Request) {
       { inlineData: { data: base64Data, mimeType: "image/jpeg" } }
     ]);
 
-    const responseText = result.response.text();
-    const cleanJson = responseText.replace(/```json|```/g, "").trim();
-    const data = JSON.parse(cleanJson);
-
-    return NextResponse.json(data);
+    return NextResponse.json(JSON.parse(result.response.text()));
   } catch (error) {
-    return NextResponse.json({ error: "Failed" }, { status: 500 });
+    console.error("API Error:", error);
+    return NextResponse.json({ error: "File too large or AI busy" }, { status: 500 });
   }
 }
