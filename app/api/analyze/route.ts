@@ -44,7 +44,7 @@ export async function POST(req: Request) {
 
     // Use Gemini 1.5 Flash for better performance with images
     const model = genAI.getGenerativeModel({ 
-      model: "gemini-1.5-flash",
+      model: "gemini-2.5-flash",
       generationConfig: { 
         responseMimeType: "application/json",
         temperature: 0.2,
