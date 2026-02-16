@@ -113,7 +113,7 @@ export default function NexVmetaPro() {
     setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 4000);
   };
 
-  // --- LIFTED LOGIC (Prevents data loss & allows background processing) ---
+  // --- LIFTED LOGIC ---
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files) return;
     const files = Array.from(e.target.files);
@@ -161,7 +161,6 @@ export default function NexVmetaPro() {
       let analysisInterval: NodeJS.Timeout | null = null;
 
       try {
-        // SAFE RATE LIMIT: 3 Seconds wait before EVERY request to avoid initial 429
         await delay(3000);
 
         setQueue(prev => prev.map(q => q.id === item.id ? { ...q, status: "analyzing", progress: 0 } : q));
@@ -174,7 +173,7 @@ export default function NexVmetaPro() {
               return q;
            }));
         }, 800);
-        
+
         const data = await analyzeWithRetry(item.publicUrl, settings, addToast);
         
         if(analysisInterval) clearInterval(analysisInterval);
@@ -188,6 +187,35 @@ export default function NexVmetaPro() {
     }
     setProcessing(false);
     addToast("Batch processing complete!", "success");
+  };
+
+  // NEW: Logic for single item retry
+  const retryItem = async (id: string) => {
+    const item = queue.find(q => q.id === id);
+    if (!item || !item.publicUrl) return;
+    
+    addToast(`Retrying analysis for ${item.name}...`, "info");
+    setQueue(prev => prev.map(q => q.id === id ? { ...q, status: "analyzing", progress: 0 } : q));
+    
+    let analysisInterval = setInterval(() => {
+       setQueue(prev => prev.map(q => {
+          if (q.id === id && q.status === "analyzing") {
+             return { ...q, progress: Math.min(q.progress + Math.floor(Math.random() * 8) + 2, 95) };
+          }
+          return q;
+       }));
+    }, 800);
+
+    try {
+      const data = await analyzeWithRetry(item.publicUrl, settings, addToast);
+      clearInterval(analysisInterval);
+      setQueue(prev => prev.map(q => q.id === id ? { ...q, status: "done", progress: 100, result: data } : q));
+      addToast(`Analyzed successfully: ${item.name}`, "success");
+    } catch (err) {
+      clearInterval(analysisInterval);
+      setQueue(prev => prev.map(q => q.id === id ? { ...q, status: "error", progress: 0 } : q));
+      addToast(`Retry failed for ${item.name}`, "error");
+    }
   };
 
   const clearAll = () => {
@@ -218,7 +246,7 @@ export default function NexVmetaPro() {
   return (
     <div className="h-screen bg-[#030308] text-white font-sans flex overflow-hidden selection:bg-blue-500/30 relative">
       
-      {/* GLOWING AMBIENT BACKGROUNDS (GLASS EFFECT) */}
+      {/* GLOWING AMBIENT BACKGROUNDS */}
       <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-blue-600/20 rounded-full blur-[120px] pointer-events-none"></div>
       <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-purple-600/20 rounded-full blur-[120px] pointer-events-none"></div>
 
@@ -232,7 +260,7 @@ export default function NexVmetaPro() {
         ))}
       </div>
 
-      {/* SIDEBAR (GLASSMORPHISM) */}
+      {/* SIDEBAR */}
       <aside className="w-20 lg:w-64 bg-white/[0.02] backdrop-blur-3xl border-r border-white/5 flex flex-col z-20 shrink-0 shadow-2xl">
         <div className="p-6 border-b border-white/5 flex items-center gap-3">
            <img src="logo.png" alt="NexVmeta Logo" className="w-10 h-10 object-contain" onError={(e) => { e.currentTarget.style.display='none'; e.currentTarget.nextElementSibling?.classList.remove('hidden'); }} />
@@ -273,6 +301,7 @@ export default function NexVmetaPro() {
                 clearAll={clearAll} 
                 exportAdobeCSV={exportAdobeCSV} 
                 addToast={addToast} 
+                retryItem={retryItem} // Passed down the new retryItem function
             />
         )}
         {activeView === "converter" && <ConverterView addToast={addToast} />}
@@ -282,7 +311,7 @@ export default function NexVmetaPro() {
         {activeView === "scraper" && <ScraperView addToast={addToast} />}
       </main>
 
-      {/* SETTINGS MODAL (GLASSY) */}
+      {/* SETTINGS MODAL */}
       {showSettings && (
         <div className="absolute top-4 right-4 z-50 w-80 bg-black/60 backdrop-blur-3xl border border-white/10 rounded-3xl shadow-2xl p-6 animate-in fade-in slide-in-from-right-10">
            <div className="flex justify-between items-center mb-6">
@@ -305,7 +334,6 @@ export default function NexVmetaPro() {
                 </div>
               </div>
               
-              {/* Length Settings */}
               {[['Title', 'titleMin', 'titleMax', 5, 100], ['Description', 'descMin', 'descMax', 10, 300], ['Keywords', 'keywordMin', 'keywordMax', 5, 49]].map(([label, minKey, maxKey, minLimit, maxLimit]) => (
                 <div key={label.toString()}>
                   <label className="text-xs text-gray-400 font-bold uppercase block mb-2">{label} Length (Min-Max)</label>
@@ -323,14 +351,13 @@ export default function NexVmetaPro() {
   );
 }
 
-// --- 1. MAIN BATCH DASHBOARD (GLASSY) ---
-function DashboardView({ queue, selectedId, setSelectedId, processing, handleUpload, runBatch, clearAll, exportAdobeCSV, addToast }: any) {
+// --- 1. MAIN BATCH DASHBOARD ---
+function DashboardView({ queue, selectedId, setSelectedId, processing, handleUpload, runBatch, clearAll, exportAdobeCSV, addToast, retryItem }: any) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const selectedItem = queue.find((q: FileItem) => q.id === selectedId);
 
   return (
     <div className="h-full flex relative z-10">
-       {/* List Sidebar (Glass) */}
        <div className="w-80 bg-white/2 backdrop-blur-xl border-r border-white/5 flex flex-col relative shrink-0 shadow-2xl">
           <div className="p-4 flex gap-2 border-b border-white/5">
              <input type="file" multiple ref={fileInputRef} className="hidden" onChange={handleUpload}/>
@@ -353,11 +380,21 @@ function DashboardView({ queue, selectedId, setSelectedId, processing, handleUpl
                    <img src={item.preview} className="w-11 h-11 rounded-xl object-cover bg-gray-900 border border-white/10 shrink-0"/>
                    <div className="min-w-0 flex-1">
                       <p className="text-xs truncate text-gray-200 font-medium">{item.name}</p>
-                      <div className="flex justify-between items-center mt-1.5">
+                      <div className="flex justify-between items-center mt-1.5 h-4">
                         <span className={`text-[9px] uppercase font-bold flex items-center gap-1 tracking-wider ${item.status === 'done' ? 'text-emerald-400' : item.status === 'error' ? 'text-red-400' : item.status === 'ready' ? 'text-yellow-400' : item.status === 'analyzing' ? 'text-purple-400' : 'text-blue-400'}`}>
                           {item.status === 'analyzing' && <RefreshCw size={10} className="animate-spin"/>}
                           {item.status === 'uploading' || item.status === 'analyzing' ? `${item.progress}%` : item.status}
                         </span>
+
+                        {/* NEW: Retry button specifically for items with 'error' status */}
+                        {item.status === 'error' && (
+                           <button 
+                             onClick={(e) => { e.stopPropagation(); retryItem(item.id); }} 
+                             className="text-[9px] bg-red-500/10 hover:bg-red-500/30 text-red-300 px-2 py-0.5 rounded border border-red-500/30 transition-colors flex items-center gap-1 shadow-sm uppercase tracking-wider font-bold"
+                           >
+                             <RefreshCw size={8} /> Retry
+                           </button>
+                        )}
                       </div>
                    </div>
                 </div>
@@ -374,7 +411,6 @@ function DashboardView({ queue, selectedId, setSelectedId, processing, handleUpl
           </div>
        </div>
 
-       {/* Analysis View (Glass) */}
        <div className="flex-1 overflow-y-auto p-10 custom-scrollbar relative">
           {selectedItem?.result ? (
              <div className="max-w-4xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-8 duration-500">
@@ -440,6 +476,12 @@ function DashboardView({ queue, selectedId, setSelectedId, processing, handleUpl
                 <AlertCircle size={80} className="mb-6 opacity-50 drop-shadow-[0_0_30px_rgba(239,68,68,0.5)]"/>
                 <p className="text-lg font-medium text-white">Analysis Failed</p>
                 <p className="text-sm text-gray-400 mt-2">Check logs or wait for Auto-Retry to clear limit.</p>
+                <button 
+                  onClick={() => retryItem(selectedItem.id)}
+                  className="mt-6 px-6 py-2.5 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 rounded-xl font-bold flex items-center gap-2 transition-all"
+                >
+                  <RefreshCw size={16} /> Click here to Retry
+                </button>
              </div>
           ) : (
              <div className="h-full flex flex-col items-center justify-center text-gray-500/50 animate-in fade-in duration-500">
@@ -452,7 +494,7 @@ function DashboardView({ queue, selectedId, setSelectedId, processing, handleUpl
   );
 }
 
-// --- 2. BG REMOVER (GLASSY) ---
+// --- 2. BG REMOVER ---
 function BgRemoverView({ addToast }: { addToast: Function }) {
   const [image, setImage] = useState<File | null>(null);
   const [resultUrl, setResultUrl] = useState<string | null>(null);
@@ -512,7 +554,7 @@ function BgRemoverView({ addToast }: { addToast: Function }) {
   );
 }
 
-// --- 3. ADVANCED UPSCALER UI (GLASSY) ---
+// --- 3. ADVANCED UPSCALER UI ---
 function UpscalerView({ addToast }: { addToast: Function }) {
   const [image, setImage] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -687,7 +729,7 @@ function UpscalerView({ addToast }: { addToast: Function }) {
   );
 }
 
-// --- 4. CONVERTER (GLASSY) ---
+// --- 4. CONVERTER ---
 function ConverterView({ addToast }: { addToast: Function }) {
   const [files, setFiles] = useState<File[]>([]);
   const [format, setFormat] = useState("image/png");
@@ -744,7 +786,7 @@ function ConverterView({ addToast }: { addToast: Function }) {
   );
 }
 
-// --- 5. DYNAMIC CALENDAR UI (GLASSY) ---
+// --- 5. DYNAMIC CALENDAR UI ---
 function CalendarView() {
   const getDynamicEvents = () => {
      const today = new Date();
@@ -800,7 +842,7 @@ function CalendarView() {
   );
 }
 
-// --- 6. DYNAMIC TREND SCRAPER UI (GLASSY) ---
+// --- 6. DYNAMIC TREND SCRAPER UI ---
 function ScraperView({ addToast }: { addToast: Function }) {
    const [trends, setTrends] = useState<any[]>([]);
    const [scanning, setScanning] = useState(true);
