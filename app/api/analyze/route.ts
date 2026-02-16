@@ -7,7 +7,7 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 // Initialize Supabase Admin Client (uses service role key for server-side)
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY! // Use service role key from env
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY! 
 );
 
 const ADOBE_BLACKLIST = `
