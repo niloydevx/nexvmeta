@@ -174,7 +174,7 @@ export default function NexVmetaPro() {
               return q;
            }));
         }, 800);
-
+        
         const data = await analyzeWithRetry(item.publicUrl, settings, addToast);
         
         if(analysisInterval) clearInterval(analysisInterval);
