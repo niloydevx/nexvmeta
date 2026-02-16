@@ -1,11 +1,13 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { NextResponse } from "next/server";
 
+// Initialize Gemini
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 
 const ADOBE_BLACKLIST = `
   BANNED BRANDS: Apple, iPhone, iPad, MacBook, Microsoft, Windows, Google, Android, Samsung, Galaxy, Sony, PlayStation, Xbox, Nintendo, Facebook, Meta, Instagram, TikTok, WhatsApp, Snapchat, Amazon, Netflix, Disney, YouTube, Nike, Adidas, Puma, Reebok, Gucci, Prada, Louis Vuitton, Zara, H&M, Walmart, eBay, Tesla, BMW, Mercedes, Ford, Toyota, Honda, Ferrari, Lamborghini, Porsche, Audi, Coca-Cola, Pepsi, Starbucks, McDonald's, KFC, Burger King, Red Bull, Nestlé.
   BANNED ARTISTS: Banksy, Yayoi Kusama, KAWS, Takashi Murakami, Damien Hirst, Jeff Koons, David Hockney, Greg Rutkowski, Artgerm, Loish, WLOP, Beeple, Ross Tran, Dr. Seuss, Maurice Sendak, Beatrix Potter, Jim Henson, Frank Gehry, Zaha Hadid, Le Corbusier.
+  BANNED FRANCHISES: Marvel, DC, Iron Man, Batman, Spider-Man, Avengers, Justice League, Pixar, Mickey Mouse, Pokémon, Pikachu, Studio Ghibli, Naruto, Dragon Ball, Star Wars, Harry Potter, Game of Thrones, Barbie, James Bond.
   BANNED TECH SPECS: 4K, 8K, Unreal Engine, V-Ray, Photorealistic, Masterpiece, Photoshop, Nikon.
 `;
 
@@ -13,7 +15,7 @@ export async function POST(req: Request) {
   try {
     const { imageUrl, settings } = await req.json();
     
-    // Fetch image from Supabase URL
+    // 1. Securely fetch the massive image from Supabase (Bypasses Vercel 4.5MB payload limit)
     const imageResponse = await fetch(imageUrl);
     if (!imageResponse.ok) throw new Error("Failed to fetch image from Storage");
     
@@ -21,24 +23,37 @@ export async function POST(req: Request) {
     const base64Data = Buffer.from(arrayBuffer).toString("base64");
     const mimeType = imageResponse.headers.get("content-type") || "image/jpeg";
     
+    // 2. Use Gemini 2.5 Flash for high speed and accuracy
     const model = genAI.getGenerativeModel({ 
-      model: "gemini-2.0-flash-lite-preview-02-05",
+      model: "gemini-2.5-flash", 
       generationConfig: { responseMimeType: "application/json" }
     });
 
+    const resolutionPrompt = settings.resolution === "8K" 
+      ? "EXTREME DETAIL: 8k, UHD, highly detailed, sharp focus, ray tracing, unreal engine 5 render, best quality."
+      : "HIGH QUALITY: 4k, photorealistic, balanced lighting, commercial quality.";
+
+    // 3. Strict Prompt Construction
     const prompt = `
       ROLE: ADOBE STOCK 2026 MODERATOR & METADATA EXPERT.
       
       STRICT SYSTEM RULES:
-      1. BLACKLIST: Remove words in this list: ${ADOBE_BLACKLIST}. Replace trademarks with generic terms.
-      2. KEYWORD PRIORITY: First 10 keywords MUST be the most critical (Subject, Action, Setting).
-      3. SCORING: Provide a relevance score (0-100) for every keyword.
-      4. LIMITS: Exactly ${settings.keywordMin}-${settings.keywordMax} keywords. Title max ${settings.titleMax} chars.
-      5. QUALITY: Scan for AI errors (6 fingers, artifacts, mangled text).
+      1. BLACKLIST ENFORCEMENT: Remove any words found in this list: ${ADOBE_BLACKLIST}. Replace trademarks with generic terms.
+      2. KEYWORD PRIORITY & SCORING: The first 10 keywords MUST be the most critical descriptors. Every keyword must have a relevance score from 0 to 100.
+      3. KEYWORD LIMITS: Return exactly between ${settings.keywordMin} and ${settings.keywordMax} keywords.
+      4. TITLE LOGIC: Max ${settings.titleMax} chars. Human-readable sentence.
+      5. HALLUCINATION CHECK: Scan for 6 fingers, mangled text, floating limbs, or severe pixel noise.
 
-      TASK: Generate Title, Description, and Keywords (with scores). Check technical quality.
+      TASK 1: METADATA ENGINE
+      Generate Title, Description, and Keywords (with 0-100 scores). Determine Category (Business=7, Graphic Resources=13).
+
+      TASK 2: FILE REVIEWER
+      Score image quality (0-100). If AI errors are found, subtract 50 points and specify in notes.
+
+      TASK 3: INSPIRATION ENGINE
+      Reverse-engineer this image into a text prompt. Strip ALL artist names and copyrighted characters. Use technical descriptions.
       
-      RETURN JSON:
+      RETURN STRICT JSON FORMAT EXACTLY LIKE THIS:
       {
         "meta": {
           "title": "string",
@@ -50,7 +65,9 @@ export async function POST(req: Request) {
           "quality_score": number,
           "notes": "string"
         },
-        "prompts": { "sanitized_prompt": "string" }
+        "prompts": {
+          "sanitized_prompt": "string"
+        }
       }
     `;
 
@@ -59,7 +76,10 @@ export async function POST(req: Request) {
       { inlineData: { data: base64Data, mimeType: mimeType } }
     ]);
 
-    return NextResponse.json(JSON.parse(result.response.text()));
+    const responseText = result.response.text();
+    const cleanJson = responseText.replace(/```json|```/g, "").trim();
+    
+    return NextResponse.json(JSON.parse(cleanJson));
   } catch (error) {
     console.error("API Error:", error);
     return NextResponse.json({ error: "Analysis Failed" }, { status: 500 });
