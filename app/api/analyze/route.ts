@@ -23,7 +23,7 @@ export async function POST(req: Request) {
     const mimeType = imageResponse.headers.get("content-type") || "image/jpeg";
     
     const model = genAI.getGenerativeModel({ 
-      model: "gemini-2.5-flash",
+      model: "gemini-2.5-flash-lite",
       generationConfig: { responseMimeType: "application/json" }
     });
 
