@@ -6,7 +6,6 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 const ADOBE_BLACKLIST = `
   BANNED BRANDS: Apple, iPhone, iPad, MacBook, Microsoft, Windows, Google, Android, Samsung, Galaxy, Sony, PlayStation, Xbox, Nintendo, Facebook, Meta, Instagram, TikTok, WhatsApp, Snapchat, Amazon, Netflix, Disney, YouTube, Nike, Adidas, Puma, Reebok, Gucci, Prada, Louis Vuitton, Zara, H&M, Walmart, eBay, Tesla, BMW, Mercedes, Ford, Toyota, Honda, Ferrari, Lamborghini, Porsche, Audi, Coca-Cola, Pepsi, Starbucks, McDonald's, KFC, Burger King, Red Bull, Nestlé.
   BANNED ARTISTS: Banksy, Yayoi Kusama, KAWS, Takashi Murakami, Damien Hirst, Jeff Koons, David Hockney, Greg Rutkowski, Artgerm, Loish, WLOP, Beeple, Ross Tran, Dr. Seuss, Maurice Sendak, Beatrix Potter, Jim Henson, Frank Gehry, Zaha Hadid, Le Corbusier.
-  BANNED FRANCHISES: Marvel, DC, Iron Man, Batman, Spider-Man, Avengers, Justice League, Pixar, Mickey Mouse, Pokémon, Pikachu, Studio Ghibli, Naruto, Dragon Ball, Star Wars, Harry Potter, Game of Thrones, Barbie, James Bond.
   BANNED TECH SPECS: 4K, 8K, Unreal Engine, V-Ray, Photorealistic, Masterpiece, Photoshop, Nikon.
 `;
 
@@ -14,7 +13,7 @@ export async function POST(req: Request) {
   try {
     const { imageUrl, settings } = await req.json();
     
-    // Securely fetch from Supabase
+    // Fetch image from Supabase URL
     const imageResponse = await fetch(imageUrl);
     if (!imageResponse.ok) throw new Error("Failed to fetch image from Storage");
     
@@ -23,7 +22,7 @@ export async function POST(req: Request) {
     const mimeType = imageResponse.headers.get("content-type") || "image/jpeg";
     
     const model = genAI.getGenerativeModel({ 
-      model: "gemini-2.5-flash-lite",
+      model: "gemini-2.0-flash-lite-preview-02-05",
       generationConfig: { responseMimeType: "application/json" }
     });
 
@@ -31,23 +30,15 @@ export async function POST(req: Request) {
       ROLE: ADOBE STOCK 2026 MODERATOR & METADATA EXPERT.
       
       STRICT SYSTEM RULES:
-      1. BLACKLIST ENFORCEMENT: Remove any words found in this list: ${ADOBE_BLACKLIST}. Replace trademarks with generic terms (e.g., 'iPhone' -> 'smartphone').
-      2. KEYWORD PRIORITY: The first 10 keywords MUST be the most critical descriptors (Subject, Action, Setting). 
-      3. KEYWORD LIMITS: Return exactly between ${settings.keywordMin} and ${settings.keywordMax} keywords.
-      4. TITLE LOGIC: Max ${settings.titleMax} chars, min ${settings.titleMin} chars. Must be a human-readable sentence.
-      5. DESCRIPTION LOGIC: Max ${settings.descMax} chars, min ${settings.descMin} chars. Write a clean, professional description suitable for stock agencies.
-      6. HALLUCINATION CHECK: Scan for 6 fingers, mangled text, floating limbs, or severe pixel noise.
+      1. BLACKLIST: Remove words in this list: ${ADOBE_BLACKLIST}. Replace trademarks with generic terms.
+      2. KEYWORD PRIORITY: First 10 keywords MUST be the most critical (Subject, Action, Setting).
+      3. SCORING: Provide a relevance score (0-100) for every keyword.
+      4. LIMITS: Exactly ${settings.keywordMin}-${settings.keywordMax} keywords. Title max ${settings.titleMax} chars.
+      5. QUALITY: Scan for AI errors (6 fingers, artifacts, mangled text).
 
-      TASK 1: METADATA ENGINE
-      Generate the Title, Description, and Keywords. Determine Category (Business=7, Graphic Resources=13, etc).
-
-      TASK 2: FILE REVIEWER
-      Score image quality (0-100). If AI errors are found, subtract 50 points and flag it in notes.
-
-      TASK 3: INSPIRATION ENGINE
-      Reverse-engineer this image into a text prompt. Strip ALL artist names and copyrighted characters. Use technical descriptions.
+      TASK: Generate Title, Description, and Keywords (with scores). Check technical quality.
       
-      RETURN STRICT JSON FORMAT:
+      RETURN JSON:
       {
         "meta": {
           "title": "string",
@@ -59,9 +50,7 @@ export async function POST(req: Request) {
           "quality_score": number,
           "notes": "string"
         },
-        "prompts": {
-          "sanitized_prompt": "string"
-        }
+        "prompts": { "sanitized_prompt": "string" }
       }
     `;
 
@@ -70,18 +59,9 @@ export async function POST(req: Request) {
       { inlineData: { data: base64Data, mimeType: mimeType } }
     ]);
 
-    const responseText = result.response.text();
-    const cleanJson = responseText.replace(/```json|```/g, "").trim();
-    
-    return NextResponse.json(JSON.parse(cleanJson));
-  } catch (error: any) {
+    return NextResponse.json(JSON.parse(result.response.text()));
+  } catch (error) {
     console.error("API Error:", error);
-
-    // Identify Rate Limits explicitly with multiple fail-safes
-    if (error.message && (error.message.includes("429") || error.message.includes("Quota exceeded") || error.status === 429)) {
-       return NextResponse.json({ error: "Rate limit exceeded (429)." }, { status: 429 });
-    }
-
-    return NextResponse.json({ error: error.message || "Analysis Failed" }, { status: 500 });
+    return NextResponse.json({ error: "Analysis Failed" }, { status: 500 });
   }
 }
