@@ -63,7 +63,7 @@ export async function POST(req: Request) {
     
     // 2. Initialize Model and attach the Schema
     const model = genAI.getGenerativeModel({ 
-      model: "gemini-2.5-flash",
+      model: "gemini-2.0-flash", // Corrected to the latest official 2.0 Flash model
       generationConfig: { 
         responseMimeType: "application/json",
         responseSchema: responseSchema // Now strictly typed!
