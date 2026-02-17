@@ -5,18 +5,20 @@ import { createClient } from '@supabase/supabase-js';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Upload, CheckCircle, XCircle, Sparkles, ScanEye, Download, Settings, LayoutGrid, 
-  Zap, RefreshCw, Sliders, Box, Wand2, Save, ShieldAlert, Plus, Edit3, Image as ImageIcon
+  Scissors, RefreshCw, Sliders, Box, Save, ShieldAlert, Plus, Edit3, Image as ImageIcon
 } from "lucide-react";
 
 // --- CONFIG ---
+const REMOVE_BG_API_KEY = "yMT4aQLjH2pkmrQ7jU5FjquV"; 
+
+// HARDCODED SUPABASE CLIENT
 const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL || "https://wfwvaxchezdbqnxqtvkm.supabase.co",
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "sb_publishable_qkpIryzPwii4fKn6lE_baQ_EGwIO5ky"
+  "https://wfwvaxchezdbqnxqtvkm.supabase.co",
+  "sb_publishable_qkpIryzPwii4fKn6lE_baQ_EGwIO5ky"
 );
 
-
 // --- TYPES ---
-type SettingsState = { titleMin: number; titleMax: number; keywordMin: number; keywordMax: number; descMin: number; descMax: number; platform: string; resolution: "4K" | "8K"; };
+type SettingsState = { titleMin: number; titleMax: number; keywordMin: number; keywordMax: number; descMin: number; descMax: number; platform: string; };
 type AnalysisResult = { meta: { title: string; description: string; keywords: { tag: string; relevance: number }[]; category: number }; technical: { quality_score: number; notes: string }; prompts: { sanitized_prompt: string }; };
 type FileItem = { id: string; file: File; preview: string; status: "idle" | "uploading" | "analyzing" | "done" | "error"; result: AnalysisResult | null; publicUrl?: string; };
 
@@ -41,7 +43,9 @@ export default function NexVmetaPro() {
   const [activeView, setActiveView] = useState("dashboard");
   const [showSettings, setShowSettings] = useState(false);
   const [toast, setToast] = useState<{message: string, type: 'success'|'error'|'info'} | null>(null);
-  const [settings, setSettings] = useState<SettingsState>({ titleMin: 15, titleMax: 70, keywordMin: 30, keywordMax: 49, descMin: 50, descMax: 200, platform: "Adobe Stock", resolution: "8K" });
+  
+  // Upscaler logic removed from settings state
+  const [settings, setSettings] = useState<SettingsState>({ titleMin: 15, titleMax: 70, keywordMin: 30, keywordMax: 49, descMin: 50, descMax: 200, platform: "Adobe Stock" });
 
   const showToast = (message: string, type: 'success'|'error'|'info' = 'info') => setToast({message, type});
 
@@ -63,7 +67,7 @@ export default function NexVmetaPro() {
           <NavItem active={activeView === "dashboard"} onClick={() => setActiveView("dashboard")} icon={LayoutGrid} label="Batch Workspace" />
           <div className="px-8 py-3 mt-4 text-[10px] uppercase text-gray-500 font-bold hidden lg:block tracking-widest">Premium Tools</div>
           <NavItem active={activeView === "converter"} onClick={() => setActiveView("converter")} icon={RefreshCw} label="Any Converter" />
-          <NavItem active={activeView === "upscaler"} onClick={() => setActiveView("upscaler")} icon={Zap} label="4K/8K Upscaler" />
+          <NavItem active={activeView === "bgremover"} onClick={() => setActiveView("bgremover")} icon={Scissors} label="Pro BG Remover" />
         </div>
 
         <div className="p-6 border-t border-white/[0.05]">
@@ -78,7 +82,7 @@ export default function NexVmetaPro() {
       <main className="flex-1 relative z-10 overflow-hidden">
         {activeView === "dashboard" && <DashboardView settings={settings} showToast={showToast} />}
         {activeView === "converter" && <ConverterView showToast={showToast} />}
-        {activeView === "upscaler" && <UpscalerView settings={settings} showToast={showToast} />}
+        {activeView === "bgremover" && <BgRemoverView showToast={showToast} />}
       </main>
 
       {/* GLASSY SETTINGS MODAL */}
@@ -91,17 +95,6 @@ export default function NexVmetaPro() {
                   <button onClick={() => setShowSettings(false)} className="bg-white/5 p-2 rounded-full hover:bg-white/10 transition-colors border border-white/5"><XCircle size={18} className="text-gray-400 hover:text-white"/></button>
               </div>
               <div className="space-y-8">
-                  <div className="bg-gradient-to-br from-blue-900/20 to-purple-900/20 p-5 rounded-2xl border border-blue-500/20 shadow-inner">
-                    <label className="text-xs text-blue-300 font-bold uppercase tracking-widest block mb-3">Upscale Target</label>
-                    <div className="flex bg-black/40 rounded-xl p-1 border border-white/5">
-                      {["4K", "8K"].map(res => (
-                          <button key={res} onClick={() => setSettings({...settings, resolution: res as "4K"|"8K"})}
-                            className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${settings.resolution === res ? 'bg-blue-600 text-white shadow-[0_0_15px_rgba(37,99,235,0.5)]' : 'text-gray-500 hover:text-gray-300'}`}>
-                            {res}
-                          </button>
-                      ))}
-                    </div>
-                  </div>
                   {[ { label: "Title Length", minKey: "titleMin", maxKey: "titleMax", absMin: 5, absMax: 100 }, { label: "Keywords", minKey: "keywordMin", maxKey: "keywordMax", absMin: 5, absMax: 49 } ].map((s: any, idx) => (
                     <div key={idx} className="space-y-2">
                       <div className="flex justify-between items-center">
@@ -140,7 +133,6 @@ function DashboardView({ settings, showToast }: { settings: SettingsState, showT
   };
 
   const runBatch = async () => {
-    if (!process.env.NEXT_PUBLIC_SUPABASE_URL) return showToast("Supabase Keys Missing!", 'error');
     setProcessing(true);
     const pending = queue.filter(q => q.status === "idle");
     for (const item of pending) {
@@ -251,7 +243,7 @@ function DashboardView({ settings, showToast }: { settings: SettingsState, showT
                   <div className="flex gap-10 bg-white/[0.02] p-8 rounded-[32px] border border-white/[0.05] shadow-[0_8px_32px_0_rgba(0,0,0,0.36)] backdrop-blur-xl">
                      <div className="relative group shrink-0">
                        <img src={selectedItem.preview} className="w-72 h-72 object-cover rounded-[24px] shadow-2xl border border-white/10"/>
-                       <div className="absolute top-4 right-4 bg-black/60 backdrop-blur-xl px-4 py-2 rounded-xl text-xs font-bold text-white border border-white/20 shadow-lg">{settings.resolution} TARGET</div>
+                       <div className="absolute top-4 right-4 bg-black/60 backdrop-blur-xl px-4 py-2 rounded-xl text-xs font-bold text-white border border-white/20 shadow-lg">PRO SCAN</div>
                      </div>
                      <div className="flex-1 space-y-6">
                         <div className="flex items-center gap-2 text-blue-400 bg-blue-500/10 w-fit px-4 py-2 rounded-full border border-blue-500/20">
@@ -322,7 +314,7 @@ function DashboardView({ settings, showToast }: { settings: SettingsState, showT
                      </div>
                      
                      <div className="p-8 bg-purple-900/10 border border-purple-500/20 rounded-[32px] shadow-[0_8px_32px_0_rgba(0,0,0,0.36)] backdrop-blur-xl relative group">
-                        <div className="text-xs text-purple-400 font-bold uppercase tracking-widest mb-4 flex items-center gap-2"><Sparkles size={16}/> {settings.resolution} Image-To-Prompt</div>
+                        <div className="text-xs text-purple-400 font-bold uppercase tracking-widest mb-4 flex items-center gap-2"><Sparkles size={16}/> Image-To-Prompt</div>
                         <div className="bg-black/50 p-6 rounded-2xl border border-white/5 h-40 overflow-y-auto custom-scrollbar shadow-inner">
                           <p className="text-sm font-mono text-gray-300 leading-relaxed opacity-90 group-hover:opacity-100 transition-opacity">
                             {selectedItem.result.prompts.sanitized_prompt}
@@ -349,10 +341,11 @@ function DashboardView({ settings, showToast }: { settings: SettingsState, showT
   );
 }
 
-// --- SUB-VIEWS (Stripped down to just Converter & Upscaler) ---
-function UpscalerView({ settings, showToast }: any) { 
-  const [prompt, setPrompt] = useState(""); const generateUpscalePrompt = () => { setPrompt(`(Upscale Trigger) Subject in ${settings.resolution} resolution, photorealistic texture, ray traced lighting, unreal engine 5 style, masterpiece --v 6.0 --upbeta`); showToast('Prompt Generated', 'success'); };
-  return <div className="h-full flex items-center justify-center p-8"><div className="bg-white/[0.02] border border-white/[0.05] rounded-[40px] p-12 max-w-2xl w-full shadow-[0_8px_32px_0_rgba(0,0,0,0.36)] backdrop-blur-2xl"><div className="flex items-center gap-6 mb-10"><div className="p-5 bg-purple-500/20 rounded-2xl border border-purple-500/30"><Zap size={32} className="text-purple-400"/></div><div><h2 className="text-3xl font-extrabold tracking-tight">AI Upscale Engineer</h2><p className="text-sm text-gray-400 mt-1">Target Engine: <span className="text-white font-bold bg-white/10 px-2 py-1 rounded-md">{settings.resolution}</span></p></div></div><div className="space-y-8"><div className="p-6 bg-black/30 rounded-2xl border border-white/5 text-gray-400 text-sm leading-relaxed shadow-inner">Generate the perfect <span className="text-purple-400 font-bold">MagnificAI</span> or <span className="text-purple-400 font-bold">Topaz</span> prompt engineered specifically to pass Adobe's technical requirements.</div><button onClick={generateUpscalePrompt} className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 text-white py-4 rounded-xl font-bold flex items-center justify-center gap-3 transition-all shadow-[0_0_20px_rgba(147,51,234,0.3)]"><Wand2 size={20}/> Synthesize {settings.resolution} Prompt</button>{prompt && <div className="bg-black/50 p-6 rounded-2xl border border-purple-500/30 relative group shadow-inner"><p className="text-sm font-mono text-gray-300 mb-4">{prompt}</p><button onClick={() => {navigator.clipboard.writeText(prompt); showToast('Copied to Clipboard', 'success')}} className="flex items-center gap-2 text-xs text-purple-400 font-bold hover:text-white bg-purple-500/10 px-4 py-2 rounded-lg border border-purple-500/20 transition-all"><Save size={14}/> Copy Payload</button></div>}</div></div></div>; 
+// --- SUB-VIEWS ---
+function BgRemoverView({ showToast }: any) { 
+  const [image, setImage] = useState<File | null>(null); const [resultUrl, setResultUrl] = useState<string | null>(null); const [loading, setLoading] = useState(false);
+  const processBgRemoval = async () => { if (!image) return; setLoading(true); const formData = new FormData(); formData.append("image_file", image); formData.append("size", "auto"); try { const response = await fetch("https://api.remove.bg/v1.0/removebg", { method: "POST", headers: { "X-Api-Key": REMOVE_BG_API_KEY }, body: formData }); if (!response.ok) throw new Error(); const blob = await response.blob(); setResultUrl(URL.createObjectURL(blob)); showToast('Background Removed!', 'success'); } catch (e) { showToast("API Limit Reached", "error"); } setLoading(false); };
+  return <div className="h-full flex items-center justify-center p-8"><div className="bg-white/[0.02] border border-white/[0.05] rounded-[40px] p-12 max-w-2xl w-full text-center shadow-[0_8px_32px_0_rgba(0,0,0,0.36)] backdrop-blur-2xl"><div className="w-20 h-20 bg-pink-500/20 rounded-2xl flex items-center justify-center mx-auto mb-8 border border-pink-500/30"><Scissors size={40} className="text-pink-400"/></div><h2 className="text-4xl font-extrabold mb-3 tracking-tight">Pro BG Remover</h2><p className="text-gray-400 mb-10 text-sm font-medium">Powered by remove.bg enterprise API</p>{!resultUrl ? <div className="space-y-6"><input type="file" onChange={(e) => setImage(e.target.files?.[0] || null)} className="block w-full text-sm text-gray-400 file:mr-6 file:py-3 file:px-6 file:rounded-xl file:border-0 file:text-sm file:font-bold file:bg-white/10 file:text-white hover:file:bg-white/20 transition-all bg-black/30 rounded-xl border border-white/5"/><button onClick={processBgRemoval} disabled={!image || loading} className="w-full bg-gradient-to-r from-pink-600 to-rose-600 text-white py-4 rounded-xl font-bold disabled:opacity-50 hover:opacity-90 transition-all shadow-lg shadow-pink-900/20">{loading ? "Processing Alpha Channel..." : "Isolate Subject"}</button></div> : <div className="space-y-6"><img src={resultUrl} className="max-h-72 mx-auto rounded-2xl border border-white/10 bg-[url('https://media.istockphoto.com/id/1146311516/vector/checker-seamless-pattern-vector-transparent-grid-background-transparency-grid-texture.jpg?s=612x612&w=0&k=20&c=d5m6hT4fA0Q0A0o9y0_0A0')]"/><div className="flex gap-4"><button onClick={() => { setImage(null); setResultUrl(null); }} className="flex-1 py-4 bg-white/5 border border-white/10 rounded-xl hover:bg-white/10 font-bold transition-all">Reset Image</button><a href={resultUrl} download="removed_bg.png" className="flex-1 py-4 bg-emerald-600 text-white rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg shadow-emerald-900/20 hover:bg-emerald-500 transition-all"><Download size={20}/> Download PNG</a></div></div>}</div></div>; 
 }
 
 function ConverterView({ showToast }: any) { 
