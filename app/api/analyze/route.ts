@@ -27,10 +27,6 @@ export async function POST(req: Request) {
       generationConfig: { responseMimeType: "application/json" }
     });
 
-    const resolutionPrompt = settings.resolution === "8K" 
-      ? "EXTREME DETAIL: 8k, UHD, highly detailed, sharp focus, ray tracing, unreal engine 5 render, best quality."
-      : "HIGH QUALITY: 4k, photorealistic, balanced lighting, commercial quality.";
-
     const prompt = `
       ROLE: ADOBE STOCK 2026 MODERATOR & METADATA EXPERT.
       
@@ -48,7 +44,7 @@ export async function POST(req: Request) {
       Score image quality (0-100). If AI errors are found, subtract 50 points and specify in notes.
 
       TASK 3: INSPIRATION ENGINE
-      Reverse-engineer this image into a text prompt. Strip ALL artist names and copyrighted characters. Use technical descriptions.
+      Reverse-engineer this image into a text prompt. Strip ALL artist names and copyrighted characters. Add "8k, UHD, highly detailed, sharp focus" for best quality generation.
       
       RETURN STRICT JSON FORMAT EXACTLY LIKE THIS:
       {
