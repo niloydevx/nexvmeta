@@ -356,7 +356,7 @@ function DashboardView({ settings, showToast, queue, setQueue, selectedId, setSe
                      </div>
                      <div className="flex flex-wrap gap-3 max-h-64 overflow-y-auto custom-scrollbar pr-2">
                         <AnimatePresence>
-                          {selectedItem.result.meta.keywords.map((k) => {
+                          {selectedItem.result.meta.keywords.map((k: { tag: string; relevance: number }) => {
                              let style = "bg-white/5 border-white/10 text-gray-400";
                              if(k.relevance >= 90) style = "bg-emerald-500/10 border-emerald-500/30 text-emerald-300 shadow-[0_0_10px_rgba(16,185,129,0.1)]";
                              else if(k.relevance >= 70) style = "bg-blue-500/10 border-blue-500/30 text-blue-300 shadow-[0_0_10px_rgba(37,99,235,0.1)]";
