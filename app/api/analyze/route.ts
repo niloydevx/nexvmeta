@@ -1,4 +1,4 @@
-import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
+import { GoogleGenerativeAI, Schema, SchemaType } from "@google/generative-ai";
 import { NextResponse } from "next/server";
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
@@ -10,8 +10,8 @@ const ADOBE_BLACKLIST = `
   BANNED TECH SPECS: 4K, 8K, Unreal Engine, V-Ray, Photorealistic, Masterpiece, Photoshop, Nikon.
 `;
 
-// Define exactly how the JSON should look so the AI never breaks the parser
-const responseSchema = {
+// Explicitly define this as type Schema to satisfy TypeScript
+const responseSchema: Schema = {
   type: SchemaType.OBJECT,
   properties: {
     meta: {
@@ -66,7 +66,7 @@ export async function POST(req: Request) {
       model: "gemini-2.5-flash",
       generationConfig: { 
         responseMimeType: "application/json",
-        responseSchema: responseSchema // Forces the AI to output perfect JSON
+        responseSchema: responseSchema // Now strictly typed!
       }
     });
 
