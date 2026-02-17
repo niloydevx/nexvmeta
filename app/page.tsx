@@ -5,11 +5,10 @@ import { createClient } from '@supabase/supabase-js';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Upload, CheckCircle, XCircle, Sparkles, ScanEye, Download, Settings, LayoutGrid, 
-  RefreshCw, Sliders, Box, Save, ShieldAlert, Plus, Edit3, Image as ImageIcon, Trash2
+  RefreshCw, Sliders, Box, Save, ShieldAlert, Plus, Edit3, Image as ImageIcon, Trash2, RotateCcw
 } from "lucide-react";
 
 // --- CONFIG ---
-// HARDCODED SUPABASE CLIENT (Bypasses Vercel Limits)
 const supabase = createClient(
   "https://wfwvaxchezdbqnxqtvkm.supabase.co",
   "sb_publishable_qkpIryzPwii4fKn6lE_baQ_EGwIO5ky"
@@ -18,7 +17,7 @@ const supabase = createClient(
 // --- TYPES ---
 type SettingsState = { titleMin: number; titleMax: number; keywordMin: number; keywordMax: number; descMin: number; descMax: number; platform: string; resolution: "4K" | "8K"; };
 type AnalysisResult = { meta: { title: string; description: string; keywords: { tag: string; relevance: number }[]; category: number }; technical: { quality_score: number; notes: string }; prompts: { sanitized_prompt: string }; };
-type FileItem = { id: string; file?: File; preview: string; status: "idle" | "uploading" | "analyzing" | "done" | "error"; result: AnalysisResult | null; publicUrl?: string; name: string; size: number; };
+type FileItem = { id: string; file?: File; preview: string; status: "idle" | "uploading" | "analyzing" | "done" | "error"; result: AnalysisResult | null; publicUrl?: string; name: string; size: number; errorMessage?: string; };
 
 // --- GLASSY TOAST SYSTEM ---
 function Toast({ message, type, onClose }: { message: string, type: 'success'|'error'|'info', onClose: () => void }) {
@@ -40,28 +39,20 @@ export default function NexVmetaPro() {
   const [activeView, setActiveView] = useState("dashboard");
   const [showSettings, setShowSettings] = useState(false);
   const [toast, setToast] = useState<{message: string, type: 'success'|'error'|'info'} | null>(null);
-  
-  // LIFTED STATE: Queue lives here so it never resets on section change
   const [queue, setQueue] = useState<FileItem[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-
   const [settings, setSettings] = useState<SettingsState>({ titleMin: 15, titleMax: 70, keywordMin: 30, keywordMax: 49, descMin: 50, descMax: 200, platform: "Adobe Stock", resolution: "8K" });
 
   const showToast = (message: string, type: 'success'|'error'|'info' = 'info') => setToast({message, type});
 
-  // Local Storage Hydration (Survives Refresh for completed items)
   useEffect(() => {
     const saved = localStorage.getItem('nexvmeta_queue');
     if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        setQueue(parsed);
-      } catch (e) {}
+      try { setQueue(JSON.parse(saved)); } catch (e) {}
     }
   }, []);
 
   useEffect(() => {
-    // Only save items with URLs (raw File objects can't be saved to localStorage)
     const savableQueue = queue.map(q => ({ ...q, file: undefined })).filter(q => q.publicUrl);
     localStorage.setItem('nexvmeta_queue', JSON.stringify(savableQueue));
   }, [queue]);
@@ -83,12 +74,8 @@ export default function NexVmetaPro() {
   return (
     <div className="h-screen bg-[#030305] text-white font-sans flex overflow-hidden relative selection:bg-blue-500/40">
       
-      {/* Ambient Background Orbs */}
-      <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-blue-600/20 rounded-full blur-[120px] pointer-events-none mix-blend-screen"></div>
-      <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-purple-600/20 rounded-full blur-[120px] pointer-events-none mix-blend-screen"></div>
-
       {/* GLASSY SIDEBAR */}
-      <aside className="w-20 lg:w-64 bg-white/[0.02] border-r border-white/[0.05] backdrop-blur-3xl flex flex-col z-20 shadow-2xl">
+      <aside className="w-20 lg:w-64 bg-[#0a0a0f] border-r border-white/[0.05] flex flex-col z-20 shadow-2xl">
         <div className="p-6 border-b border-white/[0.05] flex items-center gap-4">
            <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl flex items-center justify-center font-bold text-white shadow-[0_0_20px_rgba(59,130,246,0.4)] border border-white/20">N</div>
            <span className="font-extrabold text-2xl tracking-tight hidden lg:block bg-clip-text text-transparent bg-gradient-to-r from-white to-gray-400">NexV<span className="text-blue-500">meta</span></span>
@@ -109,12 +96,12 @@ export default function NexVmetaPro() {
       </aside>
 
       {/* MAIN CONTENT */}
-      <main className="flex-1 relative z-10 overflow-hidden">
+      <main className="flex-1 relative z-10 overflow-hidden bg-[#050508]">
         {activeView === "dashboard" && <DashboardView settings={settings} showToast={showToast} queue={queue} setQueue={setQueue} selectedId={selectedId} setSelectedId={setSelectedId} removeQueueItem={removeQueueItem} clearAllQueue={clearAllQueue} />}
         {activeView === "converter" && <ConverterView showToast={showToast} />}
       </main>
 
-      {/* SETTINGS MODAL (INPUT BOXES INSTEAD OF SLIDERS) */}
+      {/* SETTINGS MODAL */}
       <AnimatePresence>
         {showSettings && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 z-50 flex items-center justify-end bg-black/60 backdrop-blur-md p-4">
@@ -124,7 +111,6 @@ export default function NexVmetaPro() {
                   <button onClick={() => setShowSettings(false)} className="bg-white/5 p-2 rounded-full hover:bg-red-500/20 hover:text-red-400 transition-colors border border-white/5"><XCircle size={18}/></button>
               </div>
               <div className="space-y-8">
-                  {/* Upscale Target Toggle */}
                   <div className="bg-gradient-to-br from-blue-900/20 to-purple-900/20 p-5 rounded-2xl border border-blue-500/20 shadow-inner">
                     <label className="text-[10px] text-blue-300 font-bold uppercase tracking-widest block mb-3">AI Generation Target</label>
                     <div className="flex bg-black/40 rounded-xl p-1 border border-white/5">
@@ -137,12 +123,7 @@ export default function NexVmetaPro() {
                     </div>
                   </div>
 
-                  {/* Range Input Boxes */}
-                  {[ 
-                    { label: "Title Length", minKey: "titleMin", maxKey: "titleMax" }, 
-                    { label: "Description Length", minKey: "descMin", maxKey: "descMax" },
-                    { label: "Keywords Count", minKey: "keywordMin", maxKey: "keywordMax" } 
-                  ].map((s: any, idx) => (
+                  {[ { label: "Title Length", minKey: "titleMin", maxKey: "titleMax" }, { label: "Description Length", minKey: "descMin", maxKey: "descMax" }, { label: "Keywords Count", minKey: "keywordMin", maxKey: "keywordMax" } ].map((s: any, idx) => (
                     <div key={idx} className="space-y-3">
                       <label className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">{s.label}</label>
                       <div className="flex gap-4 items-center">
@@ -179,16 +160,14 @@ function DashboardView({ settings, showToast, queue, setQueue, selectedId, setSe
 
   const handleFiles = (files: FileList | File[]) => {
     const newFiles = Array.from(files).map(file => ({ 
-      id: Math.random().toString(36).substr(2, 9), 
-      file, 
-      preview: URL.createObjectURL(file), 
-      name: file.name,
-      size: file.size,
-      status: "idle" as const, 
-      result: null 
+      id: Math.random().toString(36).substr(2, 9), file, preview: URL.createObjectURL(file), name: file.name, size: file.size, status: "idle" as const, result: null 
     }));
     setQueue((prev: any) => [...prev, ...newFiles]);
     showToast(`Added ${newFiles.length} assets to workspace`, 'info');
+  };
+
+  const retryErrors = () => {
+    setQueue((prev: any) => prev.map((q: any) => q.status === 'error' ? { ...q, status: 'idle', errorMessage: undefined } : q));
   };
 
   const runBatch = async () => {
@@ -196,20 +175,26 @@ function DashboardView({ settings, showToast, queue, setQueue, selectedId, setSe
     const pending = queue.filter((q:any) => q.status === "idle" && q.file);
     for (const item of pending) {
       try {
-        setQueue((prev:any) => prev.map((q:any) => q.id === item.id ? { ...q, status: "uploading" } : q));
+        setQueue((prev:any) => prev.map((q:any) => q.id === item.id ? { ...q, status: "uploading", errorMessage: undefined } : q));
         const fileName = `${Date.now()}-${item.file.name.replace(/[^a-zA-Z0-9.]/g, '')}`;
         const { error: uploadError } = await supabase.storage.from('nexvmeta-uploads').upload(fileName, item.file);
-        if (uploadError) throw new Error(uploadError.message);
+        if (uploadError) throw new Error(`Upload Failed: ${uploadError.message}`);
         
         const { data: { publicUrl } } = supabase.storage.from('nexvmeta-uploads').getPublicUrl(fileName);
         setQueue((prev:any) => prev.map((q:any) => q.id === item.id ? { ...q, status: "analyzing", publicUrl } : q));
 
         const analyzeRes = await fetch("/api/analyze", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ imageUrl: publicUrl, settings }) });
         const data = await analyzeRes.json();
-        if(data.error) throw new Error(data.error);
+        
+        if (!analyzeRes.ok || data.error) throw new Error(data.error || `AI Error (${analyzeRes.status})`);
         
         setQueue((prev:any) => prev.map((q:any) => q.id === item.id ? { ...q, status: "done", result: data } : q));
-      } catch (err) { setQueue((prev:any) => prev.map((q:any) => q.id === item.id ? { ...q, status: "error" } : q)); }
+      } catch (err: any) { 
+        setQueue((prev:any) => prev.map((q:any) => q.id === item.id ? { ...q, status: "error", errorMessage: err.message } : q)); 
+      }
+      
+      // Throttle to prevent 429 Too Many Requests
+      await new Promise(resolve => setTimeout(resolve, 1500));
     }
     setProcessing(false);
     showToast("AI Batch Analysis Complete", 'success');
@@ -258,21 +243,27 @@ function DashboardView({ settings, showToast, queue, setQueue, selectedId, setSe
        </AnimatePresence>
 
        {/* Left Queue Manager */}
-       <div className="w-96 bg-white/[0.01] border-r border-white/[0.05] flex flex-col z-10 backdrop-blur-sm">
-          <div className="p-6">
+       <div className="w-96 bg-[#0a0a0f] border-r border-white/[0.05] flex flex-col z-10">
+          <div className="p-6 border-b border-white/[0.05]">
              <input type="file" multiple ref={fileInputRef} className="hidden" onChange={(e) => e.target.files && handleFiles(e.target.files)}/>
-             <button onClick={() => fileInputRef.current?.click()} className="w-full py-10 bg-white/[0.02] border-2 border-dashed border-white/10 hover:border-blue-500 hover:bg-blue-500/5 rounded-3xl flex flex-col items-center gap-4 transition-all group">
+             <button onClick={() => fileInputRef.current?.click()} className="w-full py-8 bg-white/[0.02] border-2 border-dashed border-white/10 hover:border-blue-500 hover:bg-blue-500/5 rounded-3xl flex flex-col items-center gap-3 transition-all group">
                 <div className="p-4 bg-white/5 group-hover:bg-blue-500/20 rounded-2xl transition-colors"><Upload size={24} className="text-gray-400 group-hover:text-blue-400"/></div>
                 <span className="text-sm font-bold uppercase tracking-widest text-gray-400 group-hover:text-blue-400">Add Media</span>
              </button>
+             
              {queue.length > 0 && (
                <div className="mt-4 flex justify-between items-center px-2">
                  <span className="text-xs font-bold text-gray-500 uppercase">{queue.length} Assets</span>
-                 <button onClick={clearAllQueue} className="text-[10px] bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 px-3 py-1.5 rounded-lg font-bold uppercase tracking-wider transition-all">Clean All</button>
+                 <div className="flex gap-2">
+                   {queue.some((q: any) => q.status === 'error') && (
+                     <button onClick={retryErrors} className="text-[10px] bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 border border-blue-500/20 px-2.5 py-1.5 rounded-lg font-bold uppercase tracking-wider flex items-center gap-1"><RotateCcw size={12}/> Retry</button>
+                   )}
+                   <button onClick={clearAllQueue} className="text-[10px] bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 px-2.5 py-1.5 rounded-lg font-bold uppercase tracking-wider transition-all">Clean All</button>
+                 </div>
                </div>
              )}
           </div>
-          <div className="flex-1 overflow-y-auto px-6 space-y-3 custom-scrollbar pb-6">
+          <div className="flex-1 overflow-y-auto px-6 space-y-3 pt-4 custom-scrollbar pb-6">
              <AnimatePresence>
                {queue.map((item:any) => (
                   <motion.div initial={{opacity:0, y:10}} animate={{opacity:1, y:0}} exit={{opacity:0, scale:0.9}} key={item.id} onClick={() => setSelectedId(item.id)} 
@@ -280,10 +271,11 @@ function DashboardView({ settings, showToast, queue, setQueue, selectedId, setSe
                      <img src={item.publicUrl || item.preview} className="w-14 h-14 rounded-xl object-cover shadow-md bg-gray-900"/>
                      <div className="min-w-0 flex-1">
                         <p className="text-sm font-semibold truncate text-gray-200 pr-6">{item.name}</p>
-                        <div className="mt-2 flex items-center">
+                        <div className="mt-2 flex items-center flex-wrap gap-2">
                           <span className={`text-[10px] px-2.5 py-1 rounded-md uppercase font-bold tracking-wider ${item.status === 'done' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/20' : item.status === 'error' ? 'bg-red-500/20 text-red-400 border border-red-500/20' : item.status === 'idle' ? 'bg-white/5 text-gray-400 border border-white/5' : 'bg-blue-500/20 text-blue-400 border border-blue-500/20 animate-pulse'}`}>
                             {item.status}
                           </span>
+                          {item.errorMessage && <span className="text-[9px] text-red-400 font-mono truncate max-w-[120px]" title={item.errorMessage}>{item.errorMessage}</span>}
                         </div>
                      </div>
                      <button onClick={(e) => removeQueueItem(item.id, e)} className="absolute right-3 top-3 p-2 bg-red-500/0 text-gray-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg opacity-0 group-hover:opacity-100 transition-all">
@@ -293,7 +285,7 @@ function DashboardView({ settings, showToast, queue, setQueue, selectedId, setSe
                ))}
              </AnimatePresence>
           </div>
-          <div className="p-6 border-t border-white/[0.05] bg-black/20 backdrop-blur-md space-y-4">
+          <div className="p-6 border-t border-white/[0.05] bg-[#0a0a0f] space-y-4">
              <button onClick={runBatch} disabled={processing || queue.filter((q:any) => q.status === 'idle').length === 0} className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 disabled:opacity-50 text-white py-4 rounded-2xl font-bold text-sm flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(37,99,235,0.4)] transition-all border border-blue-400/30">
                {processing ? <RefreshCw className="animate-spin" size={18}/> : <ScanEye size={18}/>} Initialize AI Engine
              </button>
