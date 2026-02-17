@@ -255,7 +255,7 @@ export default function NexVmetaStudioPro() {
         <div className="h-12 px-4 flex items-center justify-between border-b border-[#27272a]">
           <div className="flex items-center gap-2">
              <img src="/logo.png" alt="Logo" className="w-5 h-5 object-contain rounded" onError={(e) => e.currentTarget.style.display = 'none'} />
-             <span className="font-bold text-[13px] tracking-tight text-white">Nexvmeta <span className="text-[#4569FF]">Pro</span></span>
+             <span className="font-bold text-[13px] tracking-tight text-white">NexV<span className="text-[#4569FF]">meta</span></span>
           </div>
           <div className={`text-[10px] font-mono px-1.5 py-0.5 rounded border whitespace-nowrap transition-colors ${timeLeft !== null && timeLeft > 0 ? 'bg-red-500/10 text-red-400 border-red-500/30 animate-pulse' : 'bg-[#4569FF]/10 text-[#4569FF] border-[#4569FF]/20'}`}>
             {timeLeft !== null && timeLeft > 0 ? `Resets: ${formatTime(timeLeft)}` : `${apiLimit} RPD`}
