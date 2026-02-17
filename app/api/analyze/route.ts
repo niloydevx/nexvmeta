@@ -1,4 +1,4 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
 import { NextResponse } from "next/server";
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
@@ -10,21 +10,64 @@ const ADOBE_BLACKLIST = `
   BANNED TECH SPECS: 4K, 8K, Unreal Engine, V-Ray, Photorealistic, Masterpiece, Photoshop, Nikon.
 `;
 
+// Define exactly how the JSON should look so the AI never breaks the parser
+const responseSchema = {
+  type: SchemaType.OBJECT,
+  properties: {
+    meta: {
+      type: SchemaType.OBJECT,
+      properties: {
+        title: { type: SchemaType.STRING },
+        description: { type: SchemaType.STRING },
+        keywords: {
+          type: SchemaType.ARRAY,
+          items: {
+            type: SchemaType.OBJECT,
+            properties: {
+              tag: { type: SchemaType.STRING },
+              relevance: { type: SchemaType.NUMBER },
+            },
+          },
+        },
+        category: { type: SchemaType.NUMBER },
+      },
+    },
+    technical: {
+      type: SchemaType.OBJECT,
+      properties: {
+        quality_score: { type: SchemaType.NUMBER },
+        notes: { type: SchemaType.STRING },
+      },
+    },
+    prompts: {
+      type: SchemaType.OBJECT,
+      properties: {
+        sanitized_prompt: { type: SchemaType.STRING },
+      },
+    },
+  },
+  required: ["meta", "technical", "prompts"],
+};
+
 export async function POST(req: Request) {
   try {
     const { imageUrl, settings } = await req.json();
     
-    // Securely fetch the image from your Supabase URL
+    // 1. Fetch the image directly from your Supabase URL
     const imageResponse = await fetch(imageUrl);
-    if (!imageResponse.ok) throw new Error("Failed to fetch image from Storage");
+    if (!imageResponse.ok) throw new Error(`Supabase Fetch Failed: ${imageResponse.status}`);
     
     const arrayBuffer = await imageResponse.arrayBuffer();
     const base64Data = Buffer.from(arrayBuffer).toString("base64");
     const mimeType = imageResponse.headers.get("content-type") || "image/jpeg";
     
+    // 2. Initialize Model and attach the Schema
     const model = genAI.getGenerativeModel({ 
       model: "gemini-2.5-flash",
-      generationConfig: { responseMimeType: "application/json" }
+      generationConfig: { 
+        responseMimeType: "application/json",
+        responseSchema: responseSchema // Forces the AI to output perfect JSON
+      }
     });
 
     const resolutionPrompt = settings.resolution === "8K" 
@@ -50,23 +93,6 @@ export async function POST(req: Request) {
 
       TASK 3: INSPIRATION ENGINE
       Reverse-engineer this image into a text prompt. Strip ALL artist names and copyrighted characters. Add: "${resolutionPrompt}".
-      
-      RETURN STRICT JSON FORMAT EXACTLY LIKE THIS:
-      {
-        "meta": {
-          "title": "string",
-          "description": "string",
-          "keywords": [{ "tag": "string", "relevance": number }],
-          "category": number
-        },
-        "technical": {
-          "quality_score": number,
-          "notes": "string"
-        },
-        "prompts": {
-          "sanitized_prompt": "string"
-        }
-      }
     `;
 
     const result = await model.generateContent([
@@ -74,12 +100,11 @@ export async function POST(req: Request) {
       { inlineData: { data: base64Data, mimeType: mimeType } }
     ]);
 
-    const responseText = result.response.text();
-    const cleanJson = responseText.replace(/```json|```/g, "").trim();
-    
-    return NextResponse.json(JSON.parse(cleanJson));
-  } catch (error) {
-    console.error("API Error:", error);
-    return NextResponse.json({ error: "Analysis Failed" }, { status: 500 });
+    // 3. Return the pre-verified JSON safely
+    return NextResponse.json(JSON.parse(result.response.text()));
+
+  } catch (error: any) {
+    console.error("API Error:", error.message);
+    return NextResponse.json({ error: error.message || "Analysis Failed" }, { status: 500 });
   }
 }
