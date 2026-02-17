@@ -275,7 +275,7 @@ export default function NexVmetaStudioPro() {
                <div onClick={() => fileInputRef.current?.click()} className={`w-full max-w-xl border border-dashed rounded-xl flex flex-col items-center justify-center py-20 transition-all cursor-pointer ${isDragging ? 'bg-[#4569FF]/5 border-[#4569FF]' : 'bg-[#09090b] border-[#27272a] hover:border-zinc-500'}`}>
                   <div className="w-12 h-12 bg-[#18181b] border border-[#27272a] rounded-lg flex items-center justify-center mb-4 shadow-sm"><CloudUpload size={20} className="text-zinc-400"/></div>
                   <h2 className="text-[14px] font-bold text-zinc-200 mb-1">Drop Assets Here</h2>
-                  <p className="text-[11px] text-zinc-500 mb-6">Supports JPG, PNG, WEBP • Max 1,000 files</p>
+                  <p className="text-[11px] text-zinc-500 mb-6">Supports JPG, PNG, WEBP • Max 1,0000 files</p>
                </div>
             </div>
          ) : (
