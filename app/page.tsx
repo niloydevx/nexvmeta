@@ -13,7 +13,6 @@ const supabase = createClient(
   "https://wfwvaxchezdbqnxqtvkm.supabase.co",
   "sb_publishable_qkpIryzPwii4fKn6lE_baQ_EGwIO5ky"
 );
-
 // --- TYPES ---
 type SettingsState = { titleMin: number; titleMax: number; keywordMin: number; keywordMax: number; descMin: number; descMax: number; platform: string; resolution: "4K" | "8K"; };
 type AnalysisResult = { meta: { title: string; description: string; keywords: { tag: string; relevance: number }[]; category: number }; technical: { quality_score: number; notes: string }; prompts: { sanitized_prompt: string }; };
