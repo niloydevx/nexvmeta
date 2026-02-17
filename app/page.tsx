@@ -5,22 +5,20 @@ import { createClient } from '@supabase/supabase-js';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Upload, CheckCircle, XCircle, Sparkles, ScanEye, Download, Settings, LayoutGrid, 
-  Scissors, RefreshCw, Sliders, Box, Save, ShieldAlert, Plus, Edit3, Image as ImageIcon
+  RefreshCw, Sliders, Box, Save, ShieldAlert, Plus, Edit3, Image as ImageIcon, Trash2
 } from "lucide-react";
 
 // --- CONFIG ---
-const REMOVE_BG_API_KEY = "yMT4aQLjH2pkmrQ7jU5FjquV"; 
-
-// HARDCODED SUPABASE CLIENT
+// HARDCODED SUPABASE CLIENT (Bypasses Vercel Limits)
 const supabase = createClient(
   "https://wfwvaxchezdbqnxqtvkm.supabase.co",
   "sb_publishable_qkpIryzPwii4fKn6lE_baQ_EGwIO5ky"
 );
 
 // --- TYPES ---
-type SettingsState = { titleMin: number; titleMax: number; keywordMin: number; keywordMax: number; descMin: number; descMax: number; platform: string; };
+type SettingsState = { titleMin: number; titleMax: number; keywordMin: number; keywordMax: number; descMin: number; descMax: number; platform: string; resolution: "4K" | "8K"; };
 type AnalysisResult = { meta: { title: string; description: string; keywords: { tag: string; relevance: number }[]; category: number }; technical: { quality_score: number; notes: string }; prompts: { sanitized_prompt: string }; };
-type FileItem = { id: string; file: File; preview: string; status: "idle" | "uploading" | "analyzing" | "done" | "error"; result: AnalysisResult | null; publicUrl?: string; };
+type FileItem = { id: string; file?: File; preview: string; status: "idle" | "uploading" | "analyzing" | "done" | "error"; result: AnalysisResult | null; publicUrl?: string; name: string; size: number; };
 
 // --- GLASSY TOAST SYSTEM ---
 function Toast({ message, type, onClose }: { message: string, type: 'success'|'error'|'info', onClose: () => void }) {
@@ -29,8 +27,7 @@ function Toast({ message, type, onClose }: { message: string, type: 'success'|'e
     <motion.div initial={{ opacity: 0, y: 50, scale: 0.9 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, scale: 0.9, y: 20 }}
       className={`fixed bottom-8 right-8 px-6 py-4 rounded-2xl shadow-[0_8px_32px_0_rgba(0,0,0,0.36)] z-50 flex items-center gap-4 font-medium text-sm backdrop-blur-2xl border ${
         type === 'success' ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-200' : 
-        type === 'error' ? 'bg-red-500/10 border-red-500/30 text-red-200' : 
-        'bg-blue-500/10 border-blue-500/30 text-blue-200'
+        type === 'error' ? 'bg-red-500/10 border-red-500/30 text-red-200' : 'bg-blue-500/10 border-blue-500/30 text-blue-200'
       }`}>
       {type === 'success' ? <CheckCircle size={20} className="text-emerald-400"/> : type === 'error' ? <XCircle size={20} className="text-red-400"/> : <Sparkles size={20} className="text-blue-400"/>}
       {message}
@@ -44,10 +41,44 @@ export default function NexVmetaPro() {
   const [showSettings, setShowSettings] = useState(false);
   const [toast, setToast] = useState<{message: string, type: 'success'|'error'|'info'} | null>(null);
   
-  // Upscaler logic removed from settings state
-  const [settings, setSettings] = useState<SettingsState>({ titleMin: 15, titleMax: 70, keywordMin: 30, keywordMax: 49, descMin: 50, descMax: 200, platform: "Adobe Stock" });
+  // LIFTED STATE: Queue lives here so it never resets on section change
+  const [queue, setQueue] = useState<FileItem[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  const [settings, setSettings] = useState<SettingsState>({ titleMin: 15, titleMax: 70, keywordMin: 30, keywordMax: 49, descMin: 50, descMax: 200, platform: "Adobe Stock", resolution: "8K" });
 
   const showToast = (message: string, type: 'success'|'error'|'info' = 'info') => setToast({message, type});
+
+  // Local Storage Hydration (Survives Refresh for completed items)
+  useEffect(() => {
+    const saved = localStorage.getItem('nexvmeta_queue');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        setQueue(parsed);
+      } catch (e) {}
+    }
+  }, []);
+
+  useEffect(() => {
+    // Only save items with URLs (raw File objects can't be saved to localStorage)
+    const savableQueue = queue.map(q => ({ ...q, file: undefined })).filter(q => q.publicUrl);
+    localStorage.setItem('nexvmeta_queue', JSON.stringify(savableQueue));
+  }, [queue]);
+
+  const removeQueueItem = (id: string, e?: React.MouseEvent) => {
+    if(e) e.stopPropagation();
+    setQueue(prev => prev.filter(q => q.id !== id));
+    if (selectedId === id) setSelectedId(null);
+  };
+
+  const clearAllQueue = () => {
+    if(confirm("Are you sure you want to clean all items?")) {
+      setQueue([]);
+      setSelectedId(null);
+      localStorage.removeItem('nexvmeta_queue');
+    }
+  };
 
   return (
     <div className="h-screen bg-[#030305] text-white font-sans flex overflow-hidden relative selection:bg-blue-500/40">
@@ -67,7 +98,6 @@ export default function NexVmetaPro() {
           <NavItem active={activeView === "dashboard"} onClick={() => setActiveView("dashboard")} icon={LayoutGrid} label="Batch Workspace" />
           <div className="px-8 py-3 mt-4 text-[10px] uppercase text-gray-500 font-bold hidden lg:block tracking-widest">Premium Tools</div>
           <NavItem active={activeView === "converter"} onClick={() => setActiveView("converter")} icon={RefreshCw} label="Any Converter" />
-          <NavItem active={activeView === "bgremover"} onClick={() => setActiveView("bgremover")} icon={Scissors} label="Pro BG Remover" />
         </div>
 
         <div className="p-6 border-t border-white/[0.05]">
@@ -80,30 +110,53 @@ export default function NexVmetaPro() {
 
       {/* MAIN CONTENT */}
       <main className="flex-1 relative z-10 overflow-hidden">
-        {activeView === "dashboard" && <DashboardView settings={settings} showToast={showToast} />}
+        {activeView === "dashboard" && <DashboardView settings={settings} showToast={showToast} queue={queue} setQueue={setQueue} selectedId={selectedId} setSelectedId={setSelectedId} removeQueueItem={removeQueueItem} clearAllQueue={clearAllQueue} />}
         {activeView === "converter" && <ConverterView showToast={showToast} />}
-        {activeView === "bgremover" && <BgRemoverView showToast={showToast} />}
       </main>
 
-      {/* GLASSY SETTINGS MODAL */}
+      {/* SETTINGS MODAL (INPUT BOXES INSTEAD OF SLIDERS) */}
       <AnimatePresence>
         {showSettings && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 z-50 flex items-center justify-end bg-black/40 backdrop-blur-sm p-4">
-            <motion.div initial={{ x: 100, opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={{ x: 100, opacity: 0 }} className="w-96 h-full bg-[#0a0a0f]/90 border border-white/10 rounded-3xl shadow-[0_0_50px_rgba(0,0,0,0.5)] backdrop-blur-2xl p-8 overflow-y-auto custom-scrollbar">
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 z-50 flex items-center justify-end bg-black/60 backdrop-blur-md p-4">
+            <motion.div initial={{ x: 100, opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={{ x: 100, opacity: 0 }} className="w-96 h-full bg-[#0a0a0f]/95 border border-white/10 rounded-3xl shadow-[0_0_50px_rgba(0,0,0,0.8)] backdrop-blur-3xl p-8 overflow-y-auto custom-scrollbar">
               <div className="flex justify-between items-center mb-8 border-b border-white/10 pb-4">
                   <h3 className="font-bold flex items-center gap-2 text-xl text-white"><Sliders size={20} className="text-blue-500"/> Pro Config</h3>
-                  <button onClick={() => setShowSettings(false)} className="bg-white/5 p-2 rounded-full hover:bg-white/10 transition-colors border border-white/5"><XCircle size={18} className="text-gray-400 hover:text-white"/></button>
+                  <button onClick={() => setShowSettings(false)} className="bg-white/5 p-2 rounded-full hover:bg-red-500/20 hover:text-red-400 transition-colors border border-white/5"><XCircle size={18}/></button>
               </div>
               <div className="space-y-8">
-                  {[ { label: "Title Length", minKey: "titleMin", maxKey: "titleMax", absMin: 5, absMax: 100 }, { label: "Keywords", minKey: "keywordMin", maxKey: "keywordMax", absMin: 5, absMax: 49 } ].map((s: any, idx) => (
-                    <div key={idx} className="space-y-2">
-                      <div className="flex justify-between items-center">
-                        <label className="text-xs text-gray-400 font-bold uppercase tracking-widest">{s.label}</label>
-                        <span className="text-xs text-white font-mono bg-white/10 px-2 py-1 rounded-md">{(settings as any)[s.minKey]} - {(settings as any)[s.maxKey]}</span>
-                      </div>
-                      <div className="flex gap-3 items-center bg-black/30 p-4 rounded-2xl border border-white/5 shadow-inner">
-                        <input type="range" min={s.absMin} max={s.absMax/2} value={(settings as any)[s.minKey]} onChange={(e) => setSettings({...settings, [s.minKey]: parseInt(e.target.value)})} className="flex-1 accent-blue-500 h-1 bg-gray-800 rounded-lg appearance-none"/>
-                        <input type="range" min={s.absMax/2} max={s.absMax} value={(settings as any)[s.maxKey]} onChange={(e) => setSettings({...settings, [s.maxKey]: parseInt(e.target.value)})} className="flex-1 accent-blue-500 h-1 bg-gray-800 rounded-lg appearance-none"/>
+                  {/* Upscale Target Toggle */}
+                  <div className="bg-gradient-to-br from-blue-900/20 to-purple-900/20 p-5 rounded-2xl border border-blue-500/20 shadow-inner">
+                    <label className="text-[10px] text-blue-300 font-bold uppercase tracking-widest block mb-3">AI Generation Target</label>
+                    <div className="flex bg-black/40 rounded-xl p-1 border border-white/5">
+                      {["4K", "8K"].map(res => (
+                          <button key={res} onClick={() => setSettings({...settings, resolution: res as "4K"|"8K"})}
+                            className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${settings.resolution === res ? 'bg-blue-600 text-white shadow-[0_0_15px_rgba(37,99,235,0.5)]' : 'text-gray-500 hover:text-gray-300'}`}>
+                            {res}
+                          </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Range Input Boxes */}
+                  {[ 
+                    { label: "Title Length", minKey: "titleMin", maxKey: "titleMax" }, 
+                    { label: "Description Length", minKey: "descMin", maxKey: "descMax" },
+                    { label: "Keywords Count", minKey: "keywordMin", maxKey: "keywordMax" } 
+                  ].map((s: any, idx) => (
+                    <div key={idx} className="space-y-3">
+                      <label className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">{s.label}</label>
+                      <div className="flex gap-4 items-center">
+                        <div className="flex-1 relative">
+                          <span className="absolute left-3 top-3 text-xs text-gray-500 font-bold uppercase">Min</span>
+                          <input type="number" value={(settings as any)[s.minKey]} onChange={(e) => setSettings({...settings, [s.minKey]: parseInt(e.target.value) || 0})} 
+                            className="w-full bg-black/50 border border-white/10 rounded-xl pl-10 pr-3 py-3 text-sm text-white font-mono focus:border-blue-500 outline-none transition-all shadow-inner"/>
+                        </div>
+                        <span className="text-gray-600 font-bold">-</span>
+                        <div className="flex-1 relative">
+                           <span className="absolute left-3 top-3 text-xs text-gray-500 font-bold uppercase">Max</span>
+                           <input type="number" value={(settings as any)[s.maxKey]} onChange={(e) => setSettings({...settings, [s.maxKey]: parseInt(e.target.value) || 0})} 
+                             className="w-full bg-black/50 border border-white/10 rounded-xl pl-10 pr-3 py-3 text-sm text-white font-mono focus:border-blue-500 outline-none transition-all shadow-inner"/>
+                        </div>
                       </div>
                     </div>
                   ))}
@@ -118,68 +171,74 @@ export default function NexVmetaPro() {
 }
 
 // --- 1. PREMIUM BATCH DASHBOARD ---
-function DashboardView({ settings, showToast }: { settings: SettingsState, showToast: any }) {
-  const [queue, setQueue] = useState<FileItem[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+function DashboardView({ settings, showToast, queue, setQueue, selectedId, setSelectedId, removeQueueItem, clearAllQueue }: any) {
   const [processing, setProcessing] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [newKeyword, setNewKeyword] = useState(""); 
 
   const handleFiles = (files: FileList | File[]) => {
-    const newFiles = Array.from(files).map(file => ({ id: Math.random().toString(36).substr(2, 9), file, preview: URL.createObjectURL(file), status: "idle" as const, result: null }));
-    setQueue(prev => [...prev, ...newFiles]);
+    const newFiles = Array.from(files).map(file => ({ 
+      id: Math.random().toString(36).substr(2, 9), 
+      file, 
+      preview: URL.createObjectURL(file), 
+      name: file.name,
+      size: file.size,
+      status: "idle" as const, 
+      result: null 
+    }));
+    setQueue((prev: any) => [...prev, ...newFiles]);
     showToast(`Added ${newFiles.length} assets to workspace`, 'info');
   };
 
   const runBatch = async () => {
     setProcessing(true);
-    const pending = queue.filter(q => q.status === "idle");
+    const pending = queue.filter((q:any) => q.status === "idle" && q.file);
     for (const item of pending) {
       try {
-        setQueue(prev => prev.map(q => q.id === item.id ? { ...q, status: "uploading" } : q));
+        setQueue((prev:any) => prev.map((q:any) => q.id === item.id ? { ...q, status: "uploading" } : q));
         const fileName = `${Date.now()}-${item.file.name.replace(/[^a-zA-Z0-9.]/g, '')}`;
         const { error: uploadError } = await supabase.storage.from('nexvmeta-uploads').upload(fileName, item.file);
         if (uploadError) throw new Error(uploadError.message);
         
         const { data: { publicUrl } } = supabase.storage.from('nexvmeta-uploads').getPublicUrl(fileName);
-        setQueue(prev => prev.map(q => q.id === item.id ? { ...q, status: "analyzing", publicUrl } : q));
+        setQueue((prev:any) => prev.map((q:any) => q.id === item.id ? { ...q, status: "analyzing", publicUrl } : q));
 
         const analyzeRes = await fetch("/api/analyze", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ imageUrl: publicUrl, settings }) });
         const data = await analyzeRes.json();
         if(data.error) throw new Error(data.error);
         
-        setQueue(prev => prev.map(q => q.id === item.id ? { ...q, status: "done", result: data } : q));
-      } catch (err) { setQueue(prev => prev.map(q => q.id === item.id ? { ...q, status: "error" } : q)); }
+        setQueue((prev:any) => prev.map((q:any) => q.id === item.id ? { ...q, status: "done", result: data } : q));
+      } catch (err) { setQueue((prev:any) => prev.map((q:any) => q.id === item.id ? { ...q, status: "error" } : q)); }
     }
     setProcessing(false);
     showToast("AI Batch Analysis Complete", 'success');
   };
 
   const exportAdobeCSV = () => {
-    const completedItems = queue.filter(q => q.status === "done" && q.result);
+    const completedItems = queue.filter((q:any) => q.status === "done" && q.result);
     if (completedItems.length === 0) return showToast("No files ready for export.", 'error');
     const headers = ["Filename", "Title", "Keywords", "Category", "Releases"];
-    const rows = completedItems.map(item => {
+    const rows = completedItems.map((item:any) => {
       const res = item.result!;
-      const keywordString = res.meta.keywords.sort((a,b) => b.relevance - a.relevance).map(k => k.tag).join(",");
-      return [ `"${item.file.name}"`, `"${res.meta.title.replace(/"/g, '""')}"`, `"${keywordString}"`, res.meta.category || 7, "" ].join(",");
+      const keywordString = res.meta.keywords.sort((a:any,b:any) => b.relevance - a.relevance).map((k:any) => k.tag).join(",");
+      return [ `"${item.name}"`, `"${res.meta.title.replace(/"/g, '""')}"`, `"${keywordString}"`, res.meta.category || 7, "" ].join(",");
     });
     const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows].join("\n");
     const link = document.createElement("a"); link.href = encodeURI(csvContent); link.download = `Adobe_Pro_Export_${new Date().toISOString().slice(0,10)}.csv`; link.click();
     showToast(`Securely Exported ${completedItems.length} records`, 'success');
   };
 
-  const updateSelectedMeta = (field: 'title' | 'description', value: string) => { setQueue(prev => prev.map(q => q.id === selectedId && q.result ? { ...q, result: { ...q.result, meta: { ...q.result.meta, [field]: value } } } : q )); };
-  const removeKeyword = (tagToRemove: string) => { setQueue(prev => prev.map(q => q.id === selectedId && q.result ? { ...q, result: { ...q.result, meta: { ...q.result.meta, keywords: q.result.meta.keywords.filter(k => k.tag !== tagToRemove) } } } : q )); };
+  const updateSelectedMeta = (field: 'title' | 'description', value: string) => { setQueue((prev:any) => prev.map((q:any) => q.id === selectedId && q.result ? { ...q, result: { ...q.result, meta: { ...q.result.meta, [field]: value } } } : q )); };
+  const removeKeyword = (tagToRemove: string) => { setQueue((prev:any) => prev.map((q:any) => q.id === selectedId && q.result ? { ...q, result: { ...q.result, meta: { ...q.result.meta, keywords: q.result.meta.keywords.filter((k:any) => k.tag !== tagToRemove) } } } : q )); };
   const addKeyword = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && newKeyword.trim()) {
-      setQueue(prev => prev.map(q => q.id === selectedId && q.result ? { ...q, result: { ...q.result, meta: { ...q.result.meta, keywords: [{tag: newKeyword.trim(), relevance: 100}, ...q.result.meta.keywords] } } } : q ));
+      setQueue((prev:any) => prev.map((q:any) => q.id === selectedId && q.result ? { ...q, result: { ...q.result, meta: { ...q.result.meta, keywords: [{tag: newKeyword.trim(), relevance: 100}, ...q.result.meta.keywords] } } } : q ));
       setNewKeyword("");
     }
   };
 
-  const selectedItem = queue.find(q => q.id === selectedId);
+  const selectedItem = queue.find((q:any) => q.id === selectedId);
 
   return (
     <div className="h-full flex relative"
@@ -206,28 +265,39 @@ function DashboardView({ settings, showToast }: { settings: SettingsState, showT
                 <div className="p-4 bg-white/5 group-hover:bg-blue-500/20 rounded-2xl transition-colors"><Upload size={24} className="text-gray-400 group-hover:text-blue-400"/></div>
                 <span className="text-sm font-bold uppercase tracking-widest text-gray-400 group-hover:text-blue-400">Add Media</span>
              </button>
+             {queue.length > 0 && (
+               <div className="mt-4 flex justify-between items-center px-2">
+                 <span className="text-xs font-bold text-gray-500 uppercase">{queue.length} Assets</span>
+                 <button onClick={clearAllQueue} className="text-[10px] bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 px-3 py-1.5 rounded-lg font-bold uppercase tracking-wider transition-all">Clean All</button>
+               </div>
+             )}
           </div>
           <div className="flex-1 overflow-y-auto px-6 space-y-3 custom-scrollbar pb-6">
-             {queue.map(item => (
-                <motion.div initial={{opacity:0, y:10}} animate={{opacity:1, y:0}} key={item.id} onClick={() => setSelectedId(item.id)} 
-                  className={`flex items-center gap-4 p-3 rounded-2xl cursor-pointer border transition-all duration-300 ${selectedId === item.id ? 'border-blue-500/50 bg-blue-500/10 shadow-[0_0_30px_rgba(37,99,235,0.15)]' : 'border-white/[0.05] bg-white/[0.02] hover:bg-white/[0.05]'}`}>
-                   <img src={item.preview} className="w-14 h-14 rounded-xl object-cover shadow-md"/>
-                   <div className="min-w-0 flex-1">
-                      <p className="text-sm font-semibold truncate text-gray-200">{item.file.name}</p>
-                      <div className="mt-2 flex items-center">
-                        <span className={`text-[10px] px-2.5 py-1 rounded-md uppercase font-bold tracking-wider ${item.status === 'done' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/20' : item.status === 'error' ? 'bg-red-500/20 text-red-400 border border-red-500/20' : item.status === 'idle' ? 'bg-white/5 text-gray-400 border border-white/5' : 'bg-blue-500/20 text-blue-400 border border-blue-500/20 animate-pulse'}`}>
-                          {item.status}
-                        </span>
-                      </div>
-                   </div>
-                </motion.div>
-             ))}
+             <AnimatePresence>
+               {queue.map((item:any) => (
+                  <motion.div initial={{opacity:0, y:10}} animate={{opacity:1, y:0}} exit={{opacity:0, scale:0.9}} key={item.id} onClick={() => setSelectedId(item.id)} 
+                    className={`group flex items-center gap-4 p-3 rounded-2xl cursor-pointer border transition-all duration-300 relative ${selectedId === item.id ? 'border-blue-500/50 bg-blue-500/10 shadow-[0_0_30px_rgba(37,99,235,0.15)]' : 'border-white/[0.05] bg-white/[0.02] hover:bg-white/[0.05]'}`}>
+                     <img src={item.publicUrl || item.preview} className="w-14 h-14 rounded-xl object-cover shadow-md bg-gray-900"/>
+                     <div className="min-w-0 flex-1">
+                        <p className="text-sm font-semibold truncate text-gray-200 pr-6">{item.name}</p>
+                        <div className="mt-2 flex items-center">
+                          <span className={`text-[10px] px-2.5 py-1 rounded-md uppercase font-bold tracking-wider ${item.status === 'done' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/20' : item.status === 'error' ? 'bg-red-500/20 text-red-400 border border-red-500/20' : item.status === 'idle' ? 'bg-white/5 text-gray-400 border border-white/5' : 'bg-blue-500/20 text-blue-400 border border-blue-500/20 animate-pulse'}`}>
+                            {item.status}
+                          </span>
+                        </div>
+                     </div>
+                     <button onClick={(e) => removeQueueItem(item.id, e)} className="absolute right-3 top-3 p-2 bg-red-500/0 text-gray-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg opacity-0 group-hover:opacity-100 transition-all">
+                       <Trash2 size={16}/>
+                     </button>
+                  </motion.div>
+               ))}
+             </AnimatePresence>
           </div>
           <div className="p-6 border-t border-white/[0.05] bg-black/20 backdrop-blur-md space-y-4">
-             <button onClick={runBatch} disabled={processing || queue.filter(q => q.status === 'idle').length === 0} className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 disabled:opacity-50 text-white py-4 rounded-2xl font-bold text-sm flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(37,99,235,0.4)] transition-all border border-blue-400/30">
+             <button onClick={runBatch} disabled={processing || queue.filter((q:any) => q.status === 'idle').length === 0} className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 disabled:opacity-50 text-white py-4 rounded-2xl font-bold text-sm flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(37,99,235,0.4)] transition-all border border-blue-400/30">
                {processing ? <RefreshCw className="animate-spin" size={18}/> : <ScanEye size={18}/>} Initialize AI Engine
              </button>
-             <button onClick={exportAdobeCSV} disabled={queue.filter(q => q.status === 'done').length === 0} className="w-full bg-white/5 hover:bg-white/10 border border-white/10 disabled:opacity-50 text-white py-4 rounded-2xl font-bold text-sm flex items-center justify-center gap-2 transition-all">
+             <button onClick={exportAdobeCSV} disabled={queue.filter((q:any) => q.status === 'done').length === 0} className="w-full bg-white/5 hover:bg-white/10 border border-white/10 disabled:opacity-50 text-white py-4 rounded-2xl font-bold text-sm flex items-center justify-center gap-2 transition-all">
                <Download size={18}/> Export Verified CSV
              </button>
           </div>
@@ -242,7 +312,7 @@ function DashboardView({ settings, showToast }: { settings: SettingsState, showT
                   {/* Top: Image & Edits */}
                   <div className="flex gap-10 bg-white/[0.02] p-8 rounded-[32px] border border-white/[0.05] shadow-[0_8px_32px_0_rgba(0,0,0,0.36)] backdrop-blur-xl">
                      <div className="relative group shrink-0">
-                       <img src={selectedItem.preview} className="w-72 h-72 object-cover rounded-[24px] shadow-2xl border border-white/10"/>
+                       <img src={selectedItem.publicUrl || selectedItem.preview} className="w-72 h-72 object-cover rounded-[24px] shadow-2xl border border-white/10"/>
                        <div className="absolute top-4 right-4 bg-black/60 backdrop-blur-xl px-4 py-2 rounded-xl text-xs font-bold text-white border border-white/20 shadow-lg">PRO SCAN</div>
                      </div>
                      <div className="flex-1 space-y-6">
@@ -250,14 +320,20 @@ function DashboardView({ settings, showToast }: { settings: SettingsState, showT
                            <Edit3 size={16}/> <span className="text-xs font-bold uppercase tracking-widest">Live Metadata Editor</span>
                         </div>
                         <div>
-                           <label className="text-[10px] text-gray-500 font-bold uppercase tracking-widest ml-2">Optimized Title (Max {settings.titleMax})</label>
+                           <div className="flex justify-between items-center mb-1">
+                             <label className="text-[10px] text-gray-500 font-bold uppercase tracking-widest ml-2">Optimized Title</label>
+                             <span className={`text-[10px] font-mono ${selectedItem.result.meta.title.length > settings.titleMax ? 'text-red-400' : 'text-gray-500'}`}>{selectedItem.result.meta.title.length}/{settings.titleMax} chars</span>
+                           </div>
                            <textarea value={selectedItem.result.meta.title} onChange={(e) => updateSelectedMeta('title', e.target.value)}
-                             className="w-full bg-black/40 border border-white/10 hover:border-blue-500/50 focus:border-blue-500 focus:bg-black/60 rounded-2xl p-5 text-white text-xl font-semibold outline-none resize-none mt-2 transition-all shadow-inner" rows={2}/>
+                             className="w-full bg-black/40 border border-white/10 hover:border-blue-500/50 focus:border-blue-500 focus:bg-black/60 rounded-2xl p-5 text-white text-xl font-semibold outline-none resize-none transition-all shadow-inner" rows={2}/>
                         </div>
                         <div>
-                           <label className="text-[10px] text-gray-500 font-bold uppercase tracking-widest ml-2">Description</label>
+                           <div className="flex justify-between items-center mb-1">
+                             <label className="text-[10px] text-gray-500 font-bold uppercase tracking-widest ml-2">Description</label>
+                             <span className={`text-[10px] font-mono ${selectedItem.result.meta.description.length > settings.descMax ? 'text-red-400' : 'text-gray-500'}`}>{selectedItem.result.meta.description.length}/{settings.descMax} chars</span>
+                           </div>
                            <textarea value={selectedItem.result.meta.description} onChange={(e) => updateSelectedMeta('description', e.target.value)}
-                             className="w-full bg-black/40 border border-white/10 hover:border-blue-500/50 focus:border-blue-500 rounded-2xl p-5 text-gray-300 text-sm outline-none resize-none mt-2 transition-all shadow-inner" rows={2}/>
+                             className="w-full bg-black/40 border border-white/10 hover:border-blue-500/50 focus:border-blue-500 rounded-2xl p-5 text-gray-300 text-sm outline-none resize-none transition-all shadow-inner" rows={3}/>
                         </div>
                      </div>
                   </div>
@@ -269,7 +345,7 @@ function DashboardView({ settings, showToast }: { settings: SettingsState, showT
                            <div className="p-2.5 bg-emerald-500/20 rounded-xl"><Sparkles size={18} className="text-emerald-400"/></div>
                            <div>
                              <h3 className="text-sm font-bold text-white uppercase tracking-widest">Keyword Engine</h3>
-                             <p className="text-[10px] text-gray-500">{selectedItem.result.meta.keywords.length} tags • Ranked by AI Relevance (0-100%)</p>
+                             <p className={`text-[10px] ${selectedItem.result.meta.keywords.length > settings.keywordMax ? 'text-red-400 font-bold' : 'text-gray-500'}`}>{selectedItem.result.meta.keywords.length} tags • Ranked by AI Relevance</p>
                            </div>
                         </div>
                         <div className="flex items-center gap-2 bg-black/50 border border-white/10 rounded-xl px-4 py-2 focus-within:border-blue-500 transition-colors shadow-inner">
@@ -314,7 +390,7 @@ function DashboardView({ settings, showToast }: { settings: SettingsState, showT
                      </div>
                      
                      <div className="p-8 bg-purple-900/10 border border-purple-500/20 rounded-[32px] shadow-[0_8px_32px_0_rgba(0,0,0,0.36)] backdrop-blur-xl relative group">
-                        <div className="text-xs text-purple-400 font-bold uppercase tracking-widest mb-4 flex items-center gap-2"><Sparkles size={16}/> Image-To-Prompt</div>
+                        <div className="text-xs text-purple-400 font-bold uppercase tracking-widest mb-4 flex items-center gap-2"><Sparkles size={16}/> {settings.resolution} Image-To-Prompt</div>
                         <div className="bg-black/50 p-6 rounded-2xl border border-white/5 h-40 overflow-y-auto custom-scrollbar shadow-inner">
                           <p className="text-sm font-mono text-gray-300 leading-relaxed opacity-90 group-hover:opacity-100 transition-opacity">
                             {selectedItem.result.prompts.sanitized_prompt}
@@ -339,13 +415,6 @@ function DashboardView({ settings, showToast }: { settings: SettingsState, showT
        </div>
     </div>
   );
-}
-
-// --- SUB-VIEWS ---
-function BgRemoverView({ showToast }: any) { 
-  const [image, setImage] = useState<File | null>(null); const [resultUrl, setResultUrl] = useState<string | null>(null); const [loading, setLoading] = useState(false);
-  const processBgRemoval = async () => { if (!image) return; setLoading(true); const formData = new FormData(); formData.append("image_file", image); formData.append("size", "auto"); try { const response = await fetch("https://api.remove.bg/v1.0/removebg", { method: "POST", headers: { "X-Api-Key": REMOVE_BG_API_KEY }, body: formData }); if (!response.ok) throw new Error(); const blob = await response.blob(); setResultUrl(URL.createObjectURL(blob)); showToast('Background Removed!', 'success'); } catch (e) { showToast("API Limit Reached", "error"); } setLoading(false); };
-  return <div className="h-full flex items-center justify-center p-8"><div className="bg-white/[0.02] border border-white/[0.05] rounded-[40px] p-12 max-w-2xl w-full text-center shadow-[0_8px_32px_0_rgba(0,0,0,0.36)] backdrop-blur-2xl"><div className="w-20 h-20 bg-pink-500/20 rounded-2xl flex items-center justify-center mx-auto mb-8 border border-pink-500/30"><Scissors size={40} className="text-pink-400"/></div><h2 className="text-4xl font-extrabold mb-3 tracking-tight">Pro BG Remover</h2><p className="text-gray-400 mb-10 text-sm font-medium">Powered by remove.bg enterprise API</p>{!resultUrl ? <div className="space-y-6"><input type="file" onChange={(e) => setImage(e.target.files?.[0] || null)} className="block w-full text-sm text-gray-400 file:mr-6 file:py-3 file:px-6 file:rounded-xl file:border-0 file:text-sm file:font-bold file:bg-white/10 file:text-white hover:file:bg-white/20 transition-all bg-black/30 rounded-xl border border-white/5"/><button onClick={processBgRemoval} disabled={!image || loading} className="w-full bg-gradient-to-r from-pink-600 to-rose-600 text-white py-4 rounded-xl font-bold disabled:opacity-50 hover:opacity-90 transition-all shadow-lg shadow-pink-900/20">{loading ? "Processing Alpha Channel..." : "Isolate Subject"}</button></div> : <div className="space-y-6"><img src={resultUrl} className="max-h-72 mx-auto rounded-2xl border border-white/10 bg-[url('https://media.istockphoto.com/id/1146311516/vector/checker-seamless-pattern-vector-transparent-grid-background-transparency-grid-texture.jpg?s=612x612&w=0&k=20&c=d5m6hT4fA0Q0A0o9y0_0A0')]"/><div className="flex gap-4"><button onClick={() => { setImage(null); setResultUrl(null); }} className="flex-1 py-4 bg-white/5 border border-white/10 rounded-xl hover:bg-white/10 font-bold transition-all">Reset Image</button><a href={resultUrl} download="removed_bg.png" className="flex-1 py-4 bg-emerald-600 text-white rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg shadow-emerald-900/20 hover:bg-emerald-500 transition-all"><Download size={20}/> Download PNG</a></div></div>}</div></div>; 
 }
 
 function ConverterView({ showToast }: any) { 
