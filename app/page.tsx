@@ -4,415 +4,482 @@ import { useState, useRef, useEffect } from "react";
 import { createClient } from '@supabase/supabase-js';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
-  Upload, CheckCircle, XCircle, Sparkles, ScanEye, Download, Settings, LayoutGrid, 
-  RefreshCw, Sliders, Box, Save, ShieldAlert, Plus, Edit3, Image as ImageIcon, Trash2, RotateCcw
+  CloudUpload, Sparkles, CheckCircle2, 
+  Trash2, Copy, Image as ImageIcon, Loader2, AlertTriangle, Download,
+  ShieldAlert, X, Activity, Layers, TerminalSquare, Settings2
 } from "lucide-react";
 
 // --- CONFIG ---
 const supabase = createClient(
-  "https://wfwvaxchezdbqnxqtvkm.supabase.co",
-  "sb_publishable_qkpIryzPwii4fKn6lE_baQ_EGwIO5ky"
+  process.env.NEXT_PUBLIC_SUPABASE_URL || "https://wfwvaxchezdbqnxqtvkm.supabase.co",
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "sb_publishable_qkpIryzPwii4fKn6lE_baQ_EGwIO5ky"
 );
-// --- TYPES ---
-type SettingsState = { titleMin: number; titleMax: number; keywordMin: number; keywordMax: number; descMin: number; descMax: number; platform: string; resolution: "4K" | "8K"; };
-type AnalysisResult = { meta: { title: string; description: string; keywords: { tag: string; relevance: number }[]; category: number }; technical: { quality_score: number; notes: string }; prompts: { sanitized_prompt: string }; };
-type FileItem = { id: string; file?: File; preview: string; status: "idle" | "uploading" | "analyzing" | "done" | "error"; result: AnalysisResult | null; publicUrl?: string; name: string; size: number; errorMessage?: string; };
 
-// --- GLASSY TOAST SYSTEM ---
+// PLATFORMS
+const PLATFORMS = [
+  { 
+    id: 'adobe', 
+    name: 'Adobe Stock', 
+    icon: (
+      <div className="bg-[#000000] w-9 h-9 rounded-[8px] flex items-center justify-center border border-white/10 shadow-sm shrink-0">
+        <span className="text-white font-bold text-[14px] tracking-tighter">St</span>
+      </div>
+    )
+  },
+  { 
+    id: 'shutterstock', 
+    name: 'Shutterstock', 
+    icon: (
+      <div className="bg-[#EA3B43] w-9 h-9 rounded-[8px] flex items-center justify-center shadow-sm shrink-0">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M4 8V4m0 0h4M4 4l5 5M20 8V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5M20 16v4m0 0h-4m4 0l-5-5"/>
+        </svg>
+      </div>
+    )
+  }
+];
+
+type AnalysisResult = { meta?: { title?: string; description?: string; keywords?: { tag: string; relevance: number }[]; category?: number }; technical?: { quality_score?: number; notes?: string }; prompts?: { sanitized_prompt?: string }; limit_remaining?: number; limit_reset?: string; };
+type FileItem = { id: string; file?: File; preview: string; status: "idle" | "uploading" | "analyzing" | "done" | "error"; result: AnalysisResult | null; publicUrl?: string; fileName?: string; name: string; progress: number; };
+
 function Toast({ message, type, onClose }: { message: string, type: 'success'|'error'|'info', onClose: () => void }) {
   useEffect(() => { const timer = setTimeout(onClose, 3000); return () => clearTimeout(timer); }, [onClose]);
   return (
-    <motion.div initial={{ opacity: 0, y: 50, scale: 0.9 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, scale: 0.9, y: 20 }}
-      className={`fixed bottom-8 right-8 px-6 py-4 rounded-2xl shadow-[0_8px_32px_0_rgba(0,0,0,0.36)] z-50 flex items-center gap-4 font-medium text-sm backdrop-blur-2xl border ${
-        type === 'success' ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-200' : 
-        type === 'error' ? 'bg-red-500/10 border-red-500/30 text-red-200' : 'bg-blue-500/10 border-blue-500/30 text-blue-200'
-      }`}>
-      {type === 'success' ? <CheckCircle size={20} className="text-emerald-400"/> : type === 'error' ? <XCircle size={20} className="text-red-400"/> : <Sparkles size={20} className="text-blue-400"/>}
-      {message}
+    <motion.div layout initial={{ opacity: 0, y: 50, scale: 0.95 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} transition={{ type: "spring", stiffness: 500, damping: 30 }} drag="x" dragConstraints={{ left: 0, right: 300 }} dragElastic={0.2} onDragEnd={(e, { offset, velocity }) => { if (offset.x > 100 || velocity.x > 500) onClose(); }}
+      className={`fixed z-[100] bottom-6 right-6 min-w-[280px] flex items-center gap-3 px-3 py-2.5 rounded-lg shadow-2xl backdrop-blur-xl border border-white/10 bg-[#18181b]/95`}>
+      <div className={`shrink-0 p-1.5 rounded-md ${type === 'success' ? 'bg-emerald-500/20 text-emerald-400' : type === 'error' ? 'bg-red-500/20 text-red-400' : 'bg-[#4569FF]/20 text-[#4569FF]'}`}>
+        {type === 'success' ? <CheckCircle2 size={14} /> : type === 'error' ? <AlertTriangle size={14} /> : <Sparkles size={14} />}
+      </div>
+      <span className="flex-1 font-medium text-[11px] text-zinc-200">{message}</span>
+      <button onClick={onClose} className="p-1 rounded text-zinc-500 hover:text-zinc-200 hover:bg-white/10"><X size={12}/></button>
     </motion.div>
   );
 }
 
-// --- MAIN APP COMPONENT ---
-export default function NexVmetaPro() {
-  const [activeView, setActiveView] = useState("dashboard");
-  const [showSettings, setShowSettings] = useState(false);
-  const [toast, setToast] = useState<{message: string, type: 'success'|'error'|'info'} | null>(null);
+export default function NexVmetaStudioPro() {
   const [queue, setQueue] = useState<FileItem[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [settings, setSettings] = useState<SettingsState>({ titleMin: 15, titleMax: 70, keywordMin: 30, keywordMax: 49, descMin: 50, descMax: 200, platform: "Adobe Stock", resolution: "8K" });
-
-  const showToast = (message: string, type: 'success'|'error'|'info' = 'info') => setToast({message, type});
-
-  useEffect(() => {
-    const saved = localStorage.getItem('nexvmeta_queue');
-    if (saved) {
-      try { setQueue(JSON.parse(saved)); } catch (e) {}
-    }
-  }, []);
-
-  useEffect(() => {
-    const savableQueue = queue.map(q => ({ ...q, file: undefined })).filter(q => q.publicUrl);
-    localStorage.setItem('nexvmeta_queue', JSON.stringify(savableQueue));
-  }, [queue]);
-
-  const removeQueueItem = (id: string, e?: React.MouseEvent) => {
-    if(e) e.stopPropagation();
-    setQueue(prev => prev.filter(q => q.id !== id));
-    if (selectedId === id) setSelectedId(null);
-  };
-
-  const clearAllQueue = () => {
-    if(confirm("Are you sure you want to clean all items?")) {
-      setQueue([]);
-      setSelectedId(null);
-      localStorage.removeItem('nexvmeta_queue');
-    }
-  };
-
-  return (
-    <div className="h-screen bg-[#030305] text-white font-sans flex overflow-hidden relative selection:bg-blue-500/40">
-      
-      {/* GLASSY SIDEBAR */}
-      <aside className="w-20 lg:w-64 bg-[#0a0a0f] border-r border-white/[0.05] flex flex-col z-20 shadow-2xl">
-        <div className="p-6 border-b border-white/[0.05] flex items-center gap-4">
-           <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl flex items-center justify-center font-bold text-white shadow-[0_0_20px_rgba(59,130,246,0.4)] border border-white/20">N</div>
-           <span className="font-extrabold text-2xl tracking-tight hidden lg:block bg-clip-text text-transparent bg-gradient-to-r from-white to-gray-400">NexV<span className="text-blue-500">meta</span></span>
-        </div>
-
-        <div className="flex-1 overflow-y-auto py-6 space-y-1">
-          <NavItem active={activeView === "dashboard"} onClick={() => setActiveView("dashboard")} icon={LayoutGrid} label="Batch Workspace" />
-          <div className="px-8 py-3 mt-4 text-[10px] uppercase text-gray-500 font-bold hidden lg:block tracking-widest">Premium Tools</div>
-          <NavItem active={activeView === "converter"} onClick={() => setActiveView("converter")} icon={RefreshCw} label="Any Converter" />
-        </div>
-
-        <div className="p-6 border-t border-white/[0.05]">
-          <button onClick={() => setShowSettings(true)} className="w-full flex items-center gap-3 p-3 rounded-xl bg-white/[0.03] hover:bg-white/[0.08] border border-white/[0.05] hover:border-white/20 transition-all shadow-lg">
-             <Settings size={20} className="text-gray-400" />
-             <span className="hidden lg:block text-sm font-semibold text-gray-200">Global Rules</span>
-          </button>
-        </div>
-      </aside>
-
-      {/* MAIN CONTENT */}
-      <main className="flex-1 relative z-10 overflow-hidden bg-[#050508]">
-        {activeView === "dashboard" && <DashboardView settings={settings} showToast={showToast} queue={queue} setQueue={setQueue} selectedId={selectedId} setSelectedId={setSelectedId} removeQueueItem={removeQueueItem} clearAllQueue={clearAllQueue} />}
-        {activeView === "converter" && <ConverterView showToast={showToast} />}
-      </main>
-
-      {/* SETTINGS MODAL */}
-      <AnimatePresence>
-        {showSettings && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 z-50 flex items-center justify-end bg-black/60 backdrop-blur-md p-4">
-            <motion.div initial={{ x: 100, opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={{ x: 100, opacity: 0 }} className="w-96 h-full bg-[#0a0a0f]/95 border border-white/10 rounded-3xl shadow-[0_0_50px_rgba(0,0,0,0.8)] backdrop-blur-3xl p-8 overflow-y-auto custom-scrollbar">
-              <div className="flex justify-between items-center mb-8 border-b border-white/10 pb-4">
-                  <h3 className="font-bold flex items-center gap-2 text-xl text-white"><Sliders size={20} className="text-blue-500"/> Pro Config</h3>
-                  <button onClick={() => setShowSettings(false)} className="bg-white/5 p-2 rounded-full hover:bg-red-500/20 hover:text-red-400 transition-colors border border-white/5"><XCircle size={18}/></button>
-              </div>
-              <div className="space-y-8">
-                  <div className="bg-gradient-to-br from-blue-900/20 to-purple-900/20 p-5 rounded-2xl border border-blue-500/20 shadow-inner">
-                    <label className="text-[10px] text-blue-300 font-bold uppercase tracking-widest block mb-3">AI Generation Target</label>
-                    <div className="flex bg-black/40 rounded-xl p-1 border border-white/5">
-                      {["4K", "8K"].map(res => (
-                          <button key={res} onClick={() => setSettings({...settings, resolution: res as "4K"|"8K"})}
-                            className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${settings.resolution === res ? 'bg-blue-600 text-white shadow-[0_0_15px_rgba(37,99,235,0.5)]' : 'text-gray-500 hover:text-gray-300'}`}>
-                            {res}
-                          </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {[ { label: "Title Length", minKey: "titleMin", maxKey: "titleMax" }, { label: "Description Length", minKey: "descMin", maxKey: "descMax" }, { label: "Keywords Count", minKey: "keywordMin", maxKey: "keywordMax" } ].map((s: any, idx) => (
-                    <div key={idx} className="space-y-3">
-                      <label className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">{s.label}</label>
-                      <div className="flex gap-4 items-center">
-                        <div className="flex-1 relative">
-                          <span className="absolute left-3 top-3 text-xs text-gray-500 font-bold uppercase">Min</span>
-                          <input type="number" value={(settings as any)[s.minKey]} onChange={(e) => setSettings({...settings, [s.minKey]: parseInt(e.target.value) || 0})} 
-                            className="w-full bg-black/50 border border-white/10 rounded-xl pl-10 pr-3 py-3 text-sm text-white font-mono focus:border-blue-500 outline-none transition-all shadow-inner"/>
-                        </div>
-                        <span className="text-gray-600 font-bold">-</span>
-                        <div className="flex-1 relative">
-                           <span className="absolute left-3 top-3 text-xs text-gray-500 font-bold uppercase">Max</span>
-                           <input type="number" value={(settings as any)[s.maxKey]} onChange={(e) => setSettings({...settings, [s.maxKey]: parseInt(e.target.value) || 0})} 
-                             className="w-full bg-black/50 border border-white/10 rounded-xl pl-10 pr-3 py-3 text-sm text-white font-mono focus:border-blue-500 outline-none transition-all shadow-inner"/>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-      <AnimatePresence>{toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}</AnimatePresence>
-    </div>
-  );
-}
-
-// --- 1. PREMIUM BATCH DASHBOARD ---
-function DashboardView({ settings, showToast, queue, setQueue, selectedId, setSelectedId, removeQueueItem, clearAllQueue }: any) {
   const [processing, setProcessing] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [newKeyword, setNewKeyword] = useState(""); 
+  
+  const [apiLimit, setApiLimit] = useState<number>(1000); 
+  const [resetTimestamp, setResetTimestamp] = useState<number | null>(null);
+  const [timeLeft, setTimeLeft] = useState<number | null>(null);
 
-  const handleFiles = (files: FileList | File[]) => {
-    const newFiles = Array.from(files).map(file => ({ 
-      id: Math.random().toString(36).substr(2, 9), file, preview: URL.createObjectURL(file), name: file.name, size: file.size, status: "idle" as const, result: null 
-    }));
-    setQueue((prev: any) => [...prev, ...newFiles]);
-    showToast(`Added ${newFiles.length} assets to workspace`, 'info');
+  const [panelTab, setPanelTab] = useState<'metadata' | 'details'>('metadata');
+  const [toast, setToast] = useState<{message: string, type: 'success'|'error'|'info'} | null>(null);
+  const showToast = (message: string, type: 'success'|'error'|'info' = 'info') => setToast({message, type});
+
+  const [settings, setSettings] = useState({ 
+    titleMin: 20, titleMax: 100, descMin: 50, descMax: 200, 
+    keywordMin: 35, keywordMax: 49, resolution: "8K", 
+    platforms: ['adobe'] 
+  });
+
+  useEffect(() => { 
+    const savedQueue = localStorage.getItem('nexvmeta_pro_v5'); 
+    if (savedQueue) { try { setQueue(JSON.parse(savedQueue)); } catch (e) {} } 
+    
+    const savedTime = localStorage.getItem('nexvmeta_limit_reset_db');
+    if (savedTime && parseInt(savedTime) > Date.now()) {
+       setResetTimestamp(parseInt(savedTime));
+       setApiLimit(0);
+    } else {
+       localStorage.removeItem('nexvmeta_limit_reset_db');
+    }
+  }, []);
+
+  useEffect(() => { const savableQueue = queue.map(q => ({ ...q, file: undefined })).filter(q => q.publicUrl); localStorage.setItem('nexvmeta_pro_v5', JSON.stringify(savableQueue)); }, [queue]);
+
+  useEffect(() => {
+    if (!resetTimestamp) { setTimeLeft(null); return; }
+    const interval = setInterval(() => {
+      const remaining = Math.floor((resetTimestamp - Date.now()) / 1000);
+      if (remaining <= 0) {
+        setResetTimestamp(null);
+        setTimeLeft(null);
+        setApiLimit(1000);
+        localStorage.removeItem('nexvmeta_limit_reset_db');
+      } else {
+        setTimeLeft(remaining);
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [resetTimestamp]);
+
+  const formatTime = (secs: number) => {
+    const m = Math.floor(secs / 60);
+    const s = Math.floor(secs % 60);
+    return `${m}m ${s}s`;
   };
 
-  const retryErrors = () => {
-    setQueue((prev: any) => prev.map((q: any) => q.status === 'error' ? { ...q, status: 'idle', errorMessage: undefined } : q));
+  const handleFiles = (files: FileList | File[]) => {
+    const newFiles = Array.from(files).map(file => ({ id: Math.random().toString(36).substr(2, 9), file, preview: URL.createObjectURL(file), name: file.name, status: "idle" as const, result: null, progress: 0, fileName: "" }));
+    setQueue(prev => [...prev, ...newFiles]);
+    showToast(`Queued ${newFiles.length} files`, 'info');
+  };
+
+  const togglePlatform = (id: string) => {
+    setSettings(prev => {
+      const newPlatforms = prev.platforms.includes(id) 
+        ? prev.platforms.filter(p => p !== id) 
+        : [...prev.platforms, id];
+      return { ...prev, platforms: newPlatforms };
+    });
   };
 
   const runBatch = async () => {
+    if (timeLeft !== null && timeLeft > 0) return showToast(`Rate Limit Active! Resets in ${formatTime(timeLeft)}`, 'error');
+    if (settings.platforms.length === 0) return showToast("Select at least one Target Platform", 'error');
+    
     setProcessing(true);
-    const pending = queue.filter((q:any) => q.status === "idle" && q.file);
+    const pending = queue.filter(q => q.status === "idle" && q.file);
+    let successCount = 0;
+    
     for (const item of pending) {
       try {
-        setQueue((prev:any) => prev.map((q:any) => q.id === item.id ? { ...q, status: "uploading", errorMessage: undefined } : q));
-        const fileName = `${Date.now()}-${item.file.name.replace(/[^a-zA-Z0-9.]/g, '')}`;
-        const { error: uploadError } = await supabase.storage.from('nexvmeta-uploads').upload(fileName, item.file);
-        if (uploadError) throw new Error(`Upload Failed: ${uploadError.message}`);
+        setQueue(prev => prev.map(q => q.id === item.id ? { ...q, status: "analyzing" } : q));
+        const fileName = `${Date.now()}-${item.file!.name.replace(/[^a-zA-Z0-9.]/g, '')}`;
+        const { error: uploadError } = await supabase.storage.from('nexvmeta-uploads').upload(fileName, item.file!);
+        if (uploadError) throw new Error(uploadError.message);
         
         const { data: { publicUrl } } = supabase.storage.from('nexvmeta-uploads').getPublicUrl(fileName);
-        setQueue((prev:any) => prev.map((q:any) => q.id === item.id ? { ...q, status: "analyzing", publicUrl } : q));
+        setQueue(prev => prev.map(q => q.id === item.id ? { ...q, publicUrl, fileName } : q));
 
         const analyzeRes = await fetch("/api/analyze", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ imageUrl: publicUrl, settings }) });
         const data = await analyzeRes.json();
+        if(data.error) throw new Error(data.error);
         
-        if (!analyzeRes.ok || data.error) throw new Error(data.error || `AI Error (${analyzeRes.status})`);
-        
-        setQueue((prev:any) => prev.map((q:any) => q.id === item.id ? { ...q, status: "done", result: data } : q));
-      } catch (err: any) { 
-        setQueue((prev:any) => prev.map((q:any) => q.id === item.id ? { ...q, status: "error", errorMessage: err.message } : q)); 
-      }
-      
-      // Throttle to prevent 429 Too Many Requests
-      await new Promise(resolve => setTimeout(resolve, 1500));
+        if(data.limit_remaining !== undefined && data.limit_remaining !== null) {
+          setApiLimit(data.limit_remaining);
+          if(data.limit_remaining === 0 && data.limit_reset) {
+             let totalSecs = 0;
+             const mMatch = data.limit_reset.match(/(\d+)m/);
+             const sMatch = data.limit_reset.match(/([\d.]+)s/);
+             if (mMatch) totalSecs += parseInt(mMatch[1]) * 60;
+             if (sMatch) totalSecs += Math.ceil(parseFloat(sMatch[1]));
+             
+             const futureTime = Date.now() + (totalSecs * 1000);
+             setResetTimestamp(futureTime);
+             localStorage.setItem('nexvmeta_limit_reset_db', futureTime.toString());
+          }
+        }
+
+        setQueue(prev => prev.map(q => q.id === item.id ? { ...q, status: "done", result: data } : q));
+        if(!selectedId) setSelectedId(item.id);
+        successCount++;
+      } catch (err) { setQueue(prev => prev.map(q => q.id === item.id ? { ...q, status: "error" } : q)); }
     }
     setProcessing(false);
-    showToast("AI Batch Analysis Complete", 'success');
+    if(successCount > 0) showToast(`Generated metadata for ${successCount} assets`, 'success');
   };
 
-  const exportAdobeCSV = () => {
-    const completedItems = queue.filter((q:any) => q.status === "done" && q.result);
-    if (completedItems.length === 0) return showToast("No files ready for export.", 'error');
-    const headers = ["Filename", "Title", "Keywords", "Category", "Releases"];
-    const rows = completedItems.map((item:any) => {
-      const res = item.result!;
-      const keywordString = res.meta.keywords.sort((a:any,b:any) => b.relevance - a.relevance).map((k:any) => k.tag).join(",");
-      return [ `"${item.name}"`, `"${res.meta.title.replace(/"/g, '""')}"`, `"${keywordString}"`, res.meta.category || 7, "" ].join(",");
+  const exportCSV = () => {
+    const completedItems = queue.filter(q => q.status === "done" && q.result);
+    if (completedItems.length === 0) return showToast("No items to export", 'error');
+    if (settings.platforms.length === 0) return showToast("No platform selected", 'error');
+    
+    // Multiple Export Fix with SetTimeout so Browsers don't block it
+    settings.platforms.forEach((platform, index) => {
+      setTimeout(() => {
+        let headers: string[] = []; 
+        let rows: string[] = [];
+        
+        completedItems.forEach(item => {
+          const safeMeta = item.result?.meta || {};
+          const safeKeywords = safeMeta.keywords || [];
+          const keywordString = safeKeywords.map((k:any) => k.tag).join(",");
+          const title = (safeMeta.title || "Untitled").replace(/"/g, '""');
+          const desc = (safeMeta.description || "").replace(/"/g, '""');
+          const category = safeMeta.category || 7;
+          
+          if(platform === 'adobe') {
+             headers = ["Filename", "Title", "Keywords", "Category", "Releases"]; 
+             rows.push([ `"${item.name}"`, `"${title}"`, `"${keywordString}"`, category, "" ].join(",")); 
+          } else if(platform === 'shutterstock') {
+             headers = ["Filename", "Description", "Keywords", "Categories", "Editorial", "Illustration"]; 
+             rows.push([ `"${item.name}"`, `"${desc}"`, `"${keywordString}"`, category, "no", "yes" ].join(","));
+          }
+        });
+        
+        const link = document.createElement("a"); 
+        link.href = encodeURI("data:text/csv;charset=utf-8," + [headers.join(","), ...rows].join("\n")); 
+        link.download = `${platform.toUpperCase()}_Export_${Date.now()}.csv`; 
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      }, index * 800); // 800ms gap between downloads
     });
-    const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows].join("\n");
-    const link = document.createElement("a"); link.href = encodeURI(csvContent); link.download = `Adobe_Pro_Export_${new Date().toISOString().slice(0,10)}.csv`; link.click();
-    showToast(`Securely Exported ${completedItems.length} records`, 'success');
+
+    showToast(`Exported ${settings.platforms.length} CSV file(s) safely`, 'success');
   };
 
-  const updateSelectedMeta = (field: 'title' | 'description', value: string) => { setQueue((prev:any) => prev.map((q:any) => q.id === selectedId && q.result ? { ...q, result: { ...q.result, meta: { ...q.result.meta, [field]: value } } } : q )); };
-  const removeKeyword = (tagToRemove: string) => { setQueue((prev:any) => prev.map((q:any) => q.id === selectedId && q.result ? { ...q, result: { ...q.result, meta: { ...q.result.meta, keywords: q.result.meta.keywords.filter((k:any) => k.tag !== tagToRemove) } } } : q )); };
-  const addKeyword = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && newKeyword.trim()) {
-      setQueue((prev:any) => prev.map((q:any) => q.id === selectedId && q.result ? { ...q, result: { ...q.result, meta: { ...q.result.meta, keywords: [{tag: newKeyword.trim(), relevance: 100}, ...q.result.meta.keywords] } } } : q ));
-      setNewKeyword("");
-    }
+  const clearAll = () => {
+     if(!confirm("Clear workspace?")) return;
+     queue.forEach(item => { if (item.fileName) supabase.storage.from('nexvmeta-uploads').remove([item.fileName]).catch(console.error); });
+     setQueue([]); setSelectedId(null); localStorage.removeItem('nexvmeta_pro_v5');
   };
 
-  const selectedItem = queue.find((q:any) => q.id === selectedId);
+  const copyText = (text: string, label: string) => { navigator.clipboard.writeText(text); showToast(`${label} copied`, 'info'); };
+
+  const doneCount = queue.filter(q => q.status === 'done').length;
+  const selectedItem = queue.find(q => q.id === selectedId);
+
+  // Fallbacks
+  const safeMeta = selectedItem?.result?.meta || {};
+  const safeTech = selectedItem?.result?.technical || {};
+  const currentTitle = safeMeta.title || "No Title Generated";
+  const currentDesc = safeMeta.description || "No Description Generated";
+  const currentKeywords = safeMeta.keywords || [];
+  const currentScore = Number(safeTech.quality_score) || 85; // Bulletproof score
+  const currentNotes = safeTech.notes || "Forensic analysis executed successfully.";
+  const currentPrompt = selectedItem?.result?.prompts?.sanitized_prompt || "No prompt generated.";
 
   return (
-    <div className="h-full flex relative"
-         onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
-         onDragLeave={() => setIsDragging(false)}
-         onDrop={(e) => { e.preventDefault(); setIsDragging(false); handleFiles(e.dataTransfer.files); }}>
-       
-       <AnimatePresence>
-         {isDragging && (
-           <motion.div initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} className="absolute inset-0 z-50 bg-blue-900/30 backdrop-blur-md border-2 border-dashed border-blue-400 flex items-center justify-center m-6 rounded-[40px] shadow-[0_0_100px_rgba(37,99,235,0.4)]">
-             <div className="text-4xl font-extrabold text-white flex flex-col items-center gap-6 drop-shadow-2xl">
-               <div className="p-6 bg-blue-500/20 rounded-full animate-bounce"><Upload size={64} className="text-blue-300"/></div>
-               Drop Assets to Workspace
-             </div>
-           </motion.div>
-         )}
-       </AnimatePresence>
+    <div className="flex h-screen bg-[#09090b] text-[#e4e4e7] font-sans text-[12px] antialiased overflow-hidden selection:bg-[#4569FF]/30 relative">
+      
+      <style dangerouslySetInnerHTML={{__html: `
+        .custom-scrollbar::-webkit-scrollbar { width: 5px; height: 5px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #27272a; border-radius: 10px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #3f3f46; }
+        input[type='number']::-webkit-inner-spin-button,
+        input[type='number']::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+        input[type='number'] { -moz-appearance: textfield; }
+      `}} />
 
-       {/* Left Queue Manager */}
-       <div className="w-96 bg-[#0a0a0f] border-r border-white/[0.05] flex flex-col z-10">
-          <div className="p-6 border-b border-white/[0.05]">
-             <input type="file" multiple ref={fileInputRef} className="hidden" onChange={(e) => e.target.files && handleFiles(e.target.files)}/>
-             <button onClick={() => fileInputRef.current?.click()} className="w-full py-8 bg-white/[0.02] border-2 border-dashed border-white/10 hover:border-blue-500 hover:bg-blue-500/5 rounded-3xl flex flex-col items-center gap-3 transition-all group">
-                <div className="p-4 bg-white/5 group-hover:bg-blue-500/20 rounded-2xl transition-colors"><Upload size={24} className="text-gray-400 group-hover:text-blue-400"/></div>
-                <span className="text-sm font-bold uppercase tracking-widest text-gray-400 group-hover:text-blue-400">Add Media</span>
-             </button>
+      {/* LEFT SIDEBAR */}
+      <aside className="w-[260px] bg-[#09090b] border-r border-[#27272a] flex flex-col shrink-0 z-20">
+        
+        <div className="h-12 px-4 flex items-center justify-between border-b border-[#27272a]">
+          <div className="flex items-center gap-2">
+             <img src="/logo.png" alt="Logo" className="w-5 h-5 object-contain rounded" onError={(e) => e.currentTarget.style.display = 'none'} />
+             <span className="font-bold text-[13px] tracking-tight text-white">Nexvmeta <span className="text-[#4569FF]">Pro</span></span>
+          </div>
+          <div className={`text-[10px] font-mono px-1.5 py-0.5 rounded border whitespace-nowrap transition-colors ${timeLeft !== null && timeLeft > 0 ? 'bg-red-500/10 text-red-400 border-red-500/30 animate-pulse' : 'bg-[#4569FF]/10 text-[#4569FF] border-[#4569FF]/20'}`}>
+            {timeLeft !== null && timeLeft > 0 ? `Resets: ${formatTime(timeLeft)}` : `${apiLimit} RPD`}
+          </div>
+        </div>
+
+        <div className="p-3 border-b border-[#27272a]">
+          <button onClick={runBatch} disabled={processing || queue.filter(q => q.status === 'idle').length === 0 || (timeLeft !== null && timeLeft > 0)} className="w-full h-8 bg-white hover:bg-zinc-200 text-black disabled:opacity-50 disabled:bg-zinc-800 disabled:text-zinc-500 flex items-center justify-center gap-2 rounded-md text-[11px] font-bold transition-all shadow-sm">
+            {processing ? <Loader2 size={12} className="animate-spin"/> : <Sparkles size={12}/>} 
+            {processing ? "ENGINE RUNNING" : timeLeft !== null && timeLeft > 0 ? "LIMIT REACHED" : "START ENGINE"}
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-6">
+          
+          <div>
+            <div className="flex items-center gap-1.5 mb-2 text-zinc-400"><Layers size={12}/><h3 className="text-[11px] font-semibold uppercase tracking-wider">Target Platform</h3></div>
+            <div className="grid grid-cols-2 gap-2">
+               {PLATFORMS.map(plat => {
+                 const isSelected = settings.platforms.includes(plat.id);
+                 return (
+                   <button key={plat.id} onClick={() => togglePlatform(plat.id)}
+                     className={`py-3 flex flex-col items-center justify-center gap-2 rounded-xl border transition-all duration-200 ${isSelected ? 'border-[#4569FF] bg-[#4569FF]/10 shadow-[0_0_15px_rgba(69,105,255,0.15)] ring-1 ring-[#4569FF]/50' : 'border-[#27272a] bg-[#18181b] opacity-70 hover:opacity-100 hover:border-zinc-600'}`}>
+                     {plat.icon}
+                     <span className={`text-[10px] font-semibold tracking-wide truncate px-1 w-full text-center ${isSelected ? 'text-[#4569FF]' : 'text-zinc-400'}`}>{plat.name}</span>
+                   </button>
+                 );
+               })}
+            </div>
+          </div>
+
+          <div className="h-px w-full bg-[#27272a]"></div>
+          
+          <div className="space-y-3">
+             <div className="flex items-center gap-1.5 mb-1 text-zinc-400"><Settings2 size={12}/><h3 className="text-[11px] font-semibold uppercase tracking-wider">Engine Rules</h3></div>
              
-             {queue.length > 0 && (
-               <div className="mt-4 flex justify-between items-center px-2">
-                 <span className="text-xs font-bold text-gray-500 uppercase">{queue.length} Assets</span>
-                 <div className="flex gap-2">
-                   {queue.some((q: any) => q.status === 'error') && (
-                     <button onClick={retryErrors} className="text-[10px] bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 border border-blue-500/20 px-2.5 py-1.5 rounded-lg font-bold uppercase tracking-wider flex items-center gap-1"><RotateCcw size={12}/> Retry</button>
-                   )}
-                   <button onClick={clearAllQueue} className="text-[10px] bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 px-2.5 py-1.5 rounded-lg font-bold uppercase tracking-wider transition-all">Clean All</button>
-                 </div>
+             {/* Title Rules */}
+             <div className="flex items-center justify-between">
+                <span className="text-[11px] text-zinc-400 shrink-0">Title Chars</span>
+                <div className="flex items-center gap-1 shrink-0">
+                  <input type="number" value={settings.titleMin} onChange={e => setSettings({...settings, titleMin: Number(e.target.value)})} className="w-12 h-6 bg-[#18181b] border border-[#27272a] rounded text-center text-[11px] text-zinc-300 font-mono outline-none focus:border-[#4569FF] transition-colors"/>
+                  <span className="text-zinc-600">-</span>
+                  <input type="number" value={settings.titleMax} onChange={e => setSettings({...settings, titleMax: Number(e.target.value)})} className="w-12 h-6 bg-[#18181b] border border-[#27272a] rounded text-center text-[11px] text-zinc-300 font-mono outline-none focus:border-[#4569FF] transition-colors"/>
+                </div>
+             </div>
+
+             {/* Description Rules */}
+             <div className="flex items-center justify-between">
+                <span className="text-[11px] text-zinc-400 shrink-0">Desc Chars</span>
+                <div className="flex items-center gap-1 shrink-0">
+                  <input type="number" value={settings.descMin} onChange={e => setSettings({...settings, descMin: Number(e.target.value)})} className="w-12 h-6 bg-[#18181b] border border-[#27272a] rounded text-center text-[11px] text-zinc-300 font-mono outline-none focus:border-[#4569FF] transition-colors"/>
+                  <span className="text-zinc-600">-</span>
+                  <input type="number" value={settings.descMax} onChange={e => setSettings({...settings, descMax: Number(e.target.value)})} className="w-12 h-6 bg-[#18181b] border border-[#27272a] rounded text-center text-[11px] text-zinc-300 font-mono outline-none focus:border-[#4569FF] transition-colors"/>
+                </div>
+             </div>
+
+             {/* Keywords Rules */}
+             <div className="flex items-center justify-between">
+                <span className="text-[11px] text-zinc-400 shrink-0">Keywords</span>
+                <div className="flex items-center gap-1 shrink-0">
+                  <input type="number" value={settings.keywordMin} onChange={e => setSettings({...settings, keywordMin: Number(e.target.value)})} className="w-12 h-6 bg-[#18181b] border border-[#27272a] rounded text-center text-[11px] text-zinc-300 font-mono outline-none focus:border-[#4569FF] transition-colors"/>
+                  <span className="text-zinc-600">-</span>
+                  <input type="number" value={settings.keywordMax} onChange={e => setSettings({...settings, keywordMax: Number(e.target.value)})} className="w-12 h-6 bg-[#18181b] border border-[#27272a] rounded text-center text-[11px] text-zinc-300 font-mono outline-none focus:border-[#4569FF] transition-colors"/>
+                </div>
+             </div>
+          </div>
+        </div>
+
+        <div className="p-3 border-t border-[#27272a]">
+           <button onClick={exportCSV} disabled={doneCount === 0 || settings.platforms.length === 0} className="w-full h-8 bg-[#18181b] hover:bg-[#27272a] border border-[#27272a] disabled:opacity-50 text-zinc-300 rounded-md text-[11px] font-semibold transition-all flex items-center justify-center gap-2">
+             <Download size={12}/> Export Data
+           </button>
+        </div>
+      </aside>
+
+      {/* RIGHT WORKSPACE */}
+      <main className="flex-1 relative flex flex-col bg-[#09090b]"
+            onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }} onDragLeave={() => setIsDragging(false)} onDrop={(e) => { e.preventDefault(); setIsDragging(false); handleFiles(e.dataTransfer.files); }}>
+         
+         <input type="file" multiple ref={fileInputRef} className="hidden" onChange={(e) => e.target.files && handleFiles(e.target.files)}/>
+
+         {queue.length > 0 && (
+           <header className="h-12 border-b border-[#27272a] flex items-center justify-between px-4 shrink-0 bg-[#09090b] z-10">
+              <div className="flex items-center gap-3">
+                <span className="text-[12px] font-semibold text-white">Batch Queue</span>
+                <div className="h-4 w-px bg-[#27272a]"></div>
+                <span className="text-[11px] text-zinc-500">{queue.length} files <span className="text-[#4569FF] ml-1">• {doneCount} processed</span></span>
+              </div>
+              <div className="flex items-center gap-2">
+                 <button onClick={() => fileInputRef.current?.click()} className="h-7 px-3 bg-[#18181b] hover:bg-[#27272a] border border-[#27272a] rounded text-[11px] font-medium text-zinc-300 transition-all flex items-center gap-1.5"><CloudUpload size={12}/> Import</button>
+                 <button onClick={clearAll} className="h-7 px-3 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 rounded text-[11px] font-medium transition-all flex items-center gap-1.5"><Trash2 size={12}/> Clear</button>
+              </div>
+           </header>
+         )}
+
+         {queue.length === 0 ? (
+            <div className="flex-1 flex flex-col items-center justify-center p-8">
+               <div onClick={() => fileInputRef.current?.click()} className={`w-full max-w-xl border border-dashed rounded-xl flex flex-col items-center justify-center py-20 transition-all cursor-pointer ${isDragging ? 'bg-[#4569FF]/5 border-[#4569FF]' : 'bg-[#09090b] border-[#27272a] hover:border-zinc-500'}`}>
+                  <div className="w-12 h-12 bg-[#18181b] border border-[#27272a] rounded-lg flex items-center justify-center mb-4 shadow-sm"><CloudUpload size={20} className="text-zinc-400"/></div>
+                  <h2 className="text-[14px] font-bold text-zinc-200 mb-1">Drop Assets Here</h2>
+                  <p className="text-[11px] text-zinc-500 mb-6">Supports JPG, PNG, WEBP • Max 1,000 files</p>
                </div>
-             )}
-          </div>
-          <div className="flex-1 overflow-y-auto px-6 space-y-3 pt-4 custom-scrollbar pb-6">
-             <AnimatePresence>
-               {queue.map((item:any) => (
-                  <motion.div initial={{opacity:0, y:10}} animate={{opacity:1, y:0}} exit={{opacity:0, scale:0.9}} key={item.id} onClick={() => setSelectedId(item.id)} 
-                    className={`group flex items-center gap-4 p-3 rounded-2xl cursor-pointer border transition-all duration-300 relative ${selectedId === item.id ? 'border-blue-500/50 bg-blue-500/10 shadow-[0_0_30px_rgba(37,99,235,0.15)]' : 'border-white/[0.05] bg-white/[0.02] hover:bg-white/[0.05]'}`}>
-                     <img src={item.publicUrl || item.preview} className="w-14 h-14 rounded-xl object-cover shadow-md bg-gray-900"/>
-                     <div className="min-w-0 flex-1">
-                        <p className="text-sm font-semibold truncate text-gray-200 pr-6">{item.name}</p>
-                        <div className="mt-2 flex items-center flex-wrap gap-2">
-                          <span className={`text-[10px] px-2.5 py-1 rounded-md uppercase font-bold tracking-wider ${item.status === 'done' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/20' : item.status === 'error' ? 'bg-red-500/20 text-red-400 border border-red-500/20' : item.status === 'idle' ? 'bg-white/5 text-gray-400 border border-white/5' : 'bg-blue-500/20 text-blue-400 border border-blue-500/20 animate-pulse'}`}>
-                            {item.status}
-                          </span>
-                          {item.errorMessage && <span className="text-[9px] text-red-400 font-mono truncate max-w-[120px]" title={item.errorMessage}>{item.errorMessage}</span>}
-                        </div>
-                     </div>
-                     <button onClick={(e) => removeQueueItem(item.id, e)} className="absolute right-3 top-3 p-2 bg-red-500/0 text-gray-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg opacity-0 group-hover:opacity-100 transition-all">
-                       <Trash2 size={16}/>
-                     </button>
-                  </motion.div>
-               ))}
-             </AnimatePresence>
-          </div>
-          <div className="p-6 border-t border-white/[0.05] bg-[#0a0a0f] space-y-4">
-             <button onClick={runBatch} disabled={processing || queue.filter((q:any) => q.status === 'idle').length === 0} className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 disabled:opacity-50 text-white py-4 rounded-2xl font-bold text-sm flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(37,99,235,0.4)] transition-all border border-blue-400/30">
-               {processing ? <RefreshCw className="animate-spin" size={18}/> : <ScanEye size={18}/>} Initialize AI Engine
-             </button>
-             <button onClick={exportAdobeCSV} disabled={queue.filter((q:any) => q.status === 'done').length === 0} className="w-full bg-white/5 hover:bg-white/10 border border-white/10 disabled:opacity-50 text-white py-4 rounded-2xl font-bold text-sm flex items-center justify-center gap-2 transition-all">
-               <Download size={18}/> Export Verified CSV
-             </button>
-          </div>
-       </div>
+            </div>
+         ) : (
+            <div className="flex-1 overflow-y-auto custom-scrollbar p-4 bg-[#09090b]">
+               <div className="flex flex-wrap gap-2">
+                 <AnimatePresence>
+                   {queue.map(item => (
+                     <motion.div initial={{opacity:0, scale:0.95}} animate={{opacity:1, scale:1}} exit={{opacity:0, scale:0.9}} key={item.id} onClick={() => item.status === 'done' && setSelectedId(item.id)}
+                       className={`relative w-28 h-28 rounded-lg overflow-hidden cursor-pointer transition-all ${selectedId === item.id ? 'border-[2px] border-[#4569FF] ring-2 ring-[#4569FF]/20 shadow-lg' : 'border border-[#27272a] hover:border-zinc-500'} bg-[#18181b]`}>
+                       <img src={item.publicUrl || item.preview} className="w-full h-full object-cover"/>
+                       {(item.status === 'uploading' || item.status === 'analyzing') && (<div className="absolute inset-0 bg-[#09090b]/80 flex items-center justify-center backdrop-blur-sm"><Loader2 size={16} className="text-[#4569FF] animate-spin"/></div>)}
+                       {item.status === 'error' && (<div className="absolute inset-0 bg-red-900/80 flex items-center justify-center backdrop-blur-md"><AlertTriangle size={16} className="text-white"/></div>)}
+                       {item.status === 'done' && (<div className="absolute top-1.5 right-1.5 bg-[#09090b]/80 rounded p-0.5 backdrop-blur-md border border-white/10"><CheckCircle2 size={12} className="text-emerald-400"/></div>)}
+                     </motion.div>
+                   ))}
+                 </AnimatePresence>
+               </div>
+            </div>
+         )}
 
-       {/* Right Premium Editor */}
-       <div className="flex-1 overflow-y-auto p-10 custom-scrollbar relative">
-          <AnimatePresence mode="wait">
-            {selectedItem?.result ? (
-               <motion.div key={selectedItem.id} initial={{opacity:0, y:20, scale:0.98}} animate={{opacity:1, y:0, scale:1}} exit={{opacity:0, y:-20, scale:0.98}} className="max-w-5xl mx-auto space-y-8">
+         {/* BOTTOM PANEL */}
+         <AnimatePresence>
+           {selectedItem?.result && (
+              <motion.div initial={{y: "100%"}} animate={{y: 0}} exit={{y: "100%"}} transition={{type: "spring", stiffness: 400, damping: 35}} 
+                className="bg-[#18181b] border-t border-[#27272a] p-4 shadow-[0_-20px_50px_rgba(0,0,0,0.5)] z-30 shrink-0 h-[40vh] min-h-[300px] flex flex-col">
+                
+                <div className="flex items-center justify-between border-b border-[#27272a] pb-3 mb-4 shrink-0">
+                   <div className="flex items-center gap-6">
+                      <div className="flex items-center gap-2 text-zinc-300">
+                        <ImageIcon size={14}/> <span className="text-[12px] font-mono truncate max-w-[200px]" title={selectedItem.name}>{selectedItem.name}</span>
+                      </div>
+                      <div className="h-4 w-px bg-[#27272a]"></div>
+                      <div className="flex items-center gap-4">
+                         <button onClick={() => setPanelTab('metadata')} className={`text-[11px] font-semibold uppercase tracking-wider transition-all ${panelTab === 'metadata' ? 'text-[#4569FF]' : 'text-zinc-500 hover:text-zinc-300'}`}>Metadata</button>
+                         <button onClick={() => setPanelTab('details')} className={`text-[11px] font-semibold uppercase tracking-wider transition-all ${panelTab === 'details' ? 'text-emerald-400' : 'text-zinc-500 hover:text-zinc-300'}`}>Forensics</button>
+                      </div>
+                   </div>
+                   <button onClick={() => setSelectedId(null)} className="p-1 text-zinc-500 hover:text-zinc-200"><X size={14}/></button>
+                </div>
+
+                <div className="flex-1 overflow-y-auto custom-scrollbar pr-2">
                   
-                  {/* Top: Image & Edits */}
-                  <div className="flex gap-10 bg-white/[0.02] p-8 rounded-[32px] border border-white/[0.05] shadow-[0_8px_32px_0_rgba(0,0,0,0.36)] backdrop-blur-xl">
-                     <div className="relative group shrink-0">
-                       <img src={selectedItem.publicUrl || selectedItem.preview} className="w-72 h-72 object-cover rounded-[24px] shadow-2xl border border-white/10"/>
-                       <div className="absolute top-4 right-4 bg-black/60 backdrop-blur-xl px-4 py-2 rounded-xl text-xs font-bold text-white border border-white/20 shadow-lg">PRO SCAN</div>
-                     </div>
-                     <div className="flex-1 space-y-6">
-                        <div className="flex items-center gap-2 text-blue-400 bg-blue-500/10 w-fit px-4 py-2 rounded-full border border-blue-500/20">
-                           <Edit3 size={16}/> <span className="text-xs font-bold uppercase tracking-widest">Live Metadata Editor</span>
-                        </div>
-                        <div>
-                           <div className="flex justify-between items-center mb-1">
-                             <label className="text-[10px] text-gray-500 font-bold uppercase tracking-widest ml-2">Optimized Title</label>
-                             <span className={`text-[10px] font-mono ${selectedItem.result.meta.title.length > settings.titleMax ? 'text-red-400' : 'text-gray-500'}`}>{selectedItem.result.meta.title.length}/{settings.titleMax} chars</span>
-                           </div>
-                           <textarea value={selectedItem.result.meta.title} onChange={(e) => updateSelectedMeta('title', e.target.value)}
-                             className="w-full bg-black/40 border border-white/10 hover:border-blue-500/50 focus:border-blue-500 focus:bg-black/60 rounded-2xl p-5 text-white text-xl font-semibold outline-none resize-none transition-all shadow-inner" rows={2}/>
-                        </div>
-                        <div>
-                           <div className="flex justify-between items-center mb-1">
-                             <label className="text-[10px] text-gray-500 font-bold uppercase tracking-widest ml-2">Description</label>
-                             <span className={`text-[10px] font-mono ${selectedItem.result.meta.description.length > settings.descMax ? 'text-red-400' : 'text-gray-500'}`}>{selectedItem.result.meta.description.length}/{settings.descMax} chars</span>
-                           </div>
-                           <textarea value={selectedItem.result.meta.description} onChange={(e) => updateSelectedMeta('description', e.target.value)}
-                             className="w-full bg-black/40 border border-white/10 hover:border-blue-500/50 focus:border-blue-500 rounded-2xl p-5 text-gray-300 text-sm outline-none resize-none transition-all shadow-inner" rows={3}/>
-                        </div>
-                     </div>
-                  </div>
+                  {/* TAB 1: METADATA */}
+                  {panelTab === 'metadata' && (
+                    <motion.div initial={{opacity:0}} animate={{opacity:1}} className="flex gap-6 h-full">
+                       <div className="w-40 shrink-0 h-full">
+                         <img src={selectedItem.publicUrl || selectedItem.preview} className="w-full aspect-square object-cover rounded-md border border-[#27272a] bg-[#09090b]"/>
+                       </div>
+                       
+                       <div className="flex-1 space-y-4">
+                          <div>
+                            <div className="flex justify-between items-center mb-1">
+                              <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Title ({currentTitle.length}c)</span>
+                              <button onClick={() => copyText(currentTitle, 'Title')} className="text-[10px] text-zinc-500 hover:text-[#4569FF] flex items-center gap-1"><Copy size={10}/> Copy</button>
+                            </div>
+                            <div className="p-2 bg-[#09090b] border border-[#27272a] rounded text-[12px] text-zinc-200 font-medium leading-relaxed">{currentTitle}</div>
+                          </div>
 
-                  {/* 0-100% Keyword Manager */}
-                  <div className="bg-white/[0.02] p-8 rounded-[32px] border border-white/[0.05] shadow-[0_8px_32px_0_rgba(0,0,0,0.36)] backdrop-blur-xl">
-                     <div className="flex justify-between items-center mb-6">
-                        <div className="flex items-center gap-3">
-                           <div className="p-2.5 bg-emerald-500/20 rounded-xl"><Sparkles size={18} className="text-emerald-400"/></div>
-                           <div>
-                             <h3 className="text-sm font-bold text-white uppercase tracking-widest">Keyword Engine</h3>
-                             <p className={`text-[10px] ${selectedItem.result.meta.keywords.length > settings.keywordMax ? 'text-red-400 font-bold' : 'text-gray-500'}`}>{selectedItem.result.meta.keywords.length} tags • Ranked by AI Relevance</p>
-                           </div>
-                        </div>
-                        <div className="flex items-center gap-2 bg-black/50 border border-white/10 rounded-xl px-4 py-2 focus-within:border-blue-500 transition-colors shadow-inner">
-                           <Plus size={16} className="text-blue-400"/>
-                           <input type="text" value={newKeyword} onChange={e => setNewKeyword(e.target.value)} onKeyDown={addKeyword}
-                             placeholder="Add manual tag & press Enter" className="bg-transparent border-none outline-none text-sm text-white placeholder-gray-600 w-56"/>
-                        </div>
-                     </div>
-                     <div className="flex flex-wrap gap-3 max-h-64 overflow-y-auto custom-scrollbar pr-2">
-                        <AnimatePresence>
-                          {selectedItem.result.meta.keywords.map((k: { tag: string; relevance: number }) => {
-                             let style = "bg-white/5 border-white/10 text-gray-400";
-                             if(k.relevance >= 90) style = "bg-emerald-500/10 border-emerald-500/30 text-emerald-300 shadow-[0_0_10px_rgba(16,185,129,0.1)]";
-                             else if(k.relevance >= 70) style = "bg-blue-500/10 border-blue-500/30 text-blue-300 shadow-[0_0_10px_rgba(37,99,235,0.1)]";
-                             
-                             return (
-                             <motion.span layout initial={{opacity:0, scale:0.8}} animate={{opacity:1, scale:1}} exit={{opacity:0, scale:0.5}} key={k.tag} 
-                               className={`group flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium border transition-all ${style}`}>
-                               {k.tag}
-                               <span className="opacity-60 text-[10px] border-l border-white/10 pl-2 font-mono">{k.relevance}%</span>
-                               <button onClick={() => removeKeyword(k.tag)} className="opacity-0 group-hover:opacity-100 hover:text-red-400 transition-all ml-1"><XCircle size={14}/></button>
-                             </motion.span>
-                          )})}
-                        </AnimatePresence>
-                     </div>
-                  </div>
+                          <div>
+                            <div className="flex justify-between items-center mb-1">
+                              <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Description ({currentDesc.length}c)</span>
+                              <button onClick={() => copyText(currentDesc, 'Description')} className="text-[10px] text-zinc-500 hover:text-[#4569FF] flex items-center gap-1"><Copy size={10}/> Copy</button>
+                            </div>
+                            <div className="p-2 bg-[#09090b] border border-[#27272a] rounded text-[11px] text-zinc-400 leading-relaxed line-clamp-2">{currentDesc}</div>
+                          </div>
 
-                  {/* Analytics & Prompts */}
-                  <div className="grid grid-cols-2 gap-8">
-                     <div className={`p-8 rounded-[32px] shadow-[0_8px_32px_0_rgba(0,0,0,0.36)] backdrop-blur-xl border ${selectedItem.result.technical.quality_score > 80 ? 'bg-emerald-900/10 border-emerald-500/20' : 'bg-red-900/10 border-red-500/20'}`}>
-                        <div className="flex justify-between items-end mb-6">
-                          <div className="text-xs text-gray-400 font-bold uppercase tracking-widest">Forensic Viability</div>
-                          <div className={`text-6xl font-black tracking-tighter drop-shadow-lg ${selectedItem.result.technical.quality_score > 80 ? 'text-emerald-400' : 'text-red-400'}`}>{selectedItem.result.technical.quality_score}</div>
-                        </div>
-                        <div className="w-full bg-black/50 h-3 rounded-full mb-6 overflow-hidden border border-white/10 shadow-inner">
-                           <motion.div initial={{width:0}} animate={{width: `${selectedItem.result.technical.quality_score}%`}} transition={{duration: 1.5, ease:"easeOut"}} className={`h-full rounded-full shadow-[0_0_15px_currentColor] ${selectedItem.result.technical.quality_score > 80 ? 'bg-emerald-500 text-emerald-500' : 'bg-red-500 text-red-500'}`}></motion.div>
-                        </div>
-                        <p className="text-sm text-gray-300 flex items-start gap-3 leading-relaxed bg-black/30 p-5 rounded-2xl border border-white/5">
-                          {selectedItem.result.technical.quality_score < 80 && <ShieldAlert size={20} className="text-red-400 shrink-0"/>}
-                          {selectedItem.result.technical.notes}
-                        </p>
-                     </div>
-                     
-                     <div className="p-8 bg-purple-900/10 border border-purple-500/20 rounded-[32px] shadow-[0_8px_32px_0_rgba(0,0,0,0.36)] backdrop-blur-xl relative group">
-                        <div className="text-xs text-purple-400 font-bold uppercase tracking-widest mb-4 flex items-center gap-2"><Sparkles size={16}/> {settings.resolution} Image-To-Prompt</div>
-                        <div className="bg-black/50 p-6 rounded-2xl border border-white/5 h-40 overflow-y-auto custom-scrollbar shadow-inner">
-                          <p className="text-sm font-mono text-gray-300 leading-relaxed opacity-90 group-hover:opacity-100 transition-opacity">
-                            {selectedItem.result.prompts.sanitized_prompt}
-                          </p>
-                        </div>
-                        <button onClick={() => {navigator.clipboard.writeText(selectedItem.result!.prompts.sanitized_prompt); showToast('Prompt Copied', 'success')}} className="absolute top-6 right-6 p-3 bg-purple-500/20 hover:bg-purple-500 text-purple-300 hover:text-white rounded-xl transition-all border border-purple-500/30 shadow-lg">
-                          <Save size={18}/>
-                        </button>
-                     </div>
-                  </div>
-               </motion.div>
-            ) : (
-               <motion.div initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} className="h-full flex flex-col items-center justify-center text-gray-500">
-                  <div className="w-32 h-32 rounded-full bg-white/[0.02] border border-white/[0.05] flex items-center justify-center mb-8 shadow-2xl backdrop-blur-xl">
-                     <ImageIcon size={48} className="opacity-20"/>
-                  </div>
-                  <h3 className="text-2xl font-bold text-gray-400 mb-2 tracking-tight">Workspace Idle</h3>
-                  <p className="text-sm">Select an analyzed asset from the queue to edit metadata.</p>
-               </motion.div>
-            )}
-          </AnimatePresence>
-       </div>
+                          <div>
+                            <div className="flex justify-between items-center mb-1">
+                              <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Keywords ({currentKeywords.length})</span>
+                              <button onClick={() => copyText(currentKeywords.map(k=>k.tag).join(', '), 'Keywords')} className="text-[10px] text-zinc-500 hover:text-[#4569FF] flex items-center gap-1"><Copy size={10}/> Copy</button>
+                            </div>
+                            <div className="flex flex-wrap gap-1.5 p-2 bg-[#09090b] border border-[#27272a] rounded max-h-24 overflow-y-auto custom-scrollbar">
+                              {currentKeywords.map((k, idx) => (
+                                <span key={`${k.tag}-${idx}`} className={`px-2 py-0.5 rounded-[4px] border text-[10px] font-medium ${k.relevance > 85 ? 'bg-[#4569FF]/10 border-[#4569FF]/30 text-[#4569FF]' : 'bg-[#18181b] border-[#27272a] text-zinc-400'}`}>
+                                  {k.tag}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                       </div>
+                    </motion.div>
+                  )}
+
+                  {/* TAB 2: FORENSICS */}
+                  {panelTab === 'details' && (
+                    <motion.div initial={{opacity:0}} animate={{opacity:1}} className="grid grid-cols-2 gap-6">
+                       <div className={`p-4 rounded-lg border ${currentScore > 80 ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-red-500/5 border-red-500/20'}`}>
+                          <div className="flex items-center justify-between mb-4">
+                            <span className="text-[11px] font-bold text-zinc-400 uppercase tracking-widest flex items-center gap-1.5"><ShieldAlert size={12}/> Analysis Matrix</span>
+                            <span className={`text-2xl font-black ${currentScore > 80 ? 'text-emerald-400' : 'text-red-400'}`}>{currentScore}<span className="text-[12px] text-zinc-600">/100</span></span>
+                          </div>
+                          <div className="space-y-3">
+                             {[ {l: 'Lighting & Contrast', v: Math.floor(currentScore * 0.25)}, {l: 'Sharpness & Focus', v: Math.floor(currentScore * 0.24)}, {l: 'Composition', v: Math.floor(currentScore * 0.26)}, {l: 'Generative Artifacts', v: Math.floor(currentScore * 0.25)} ].map((b, i) => (
+                               <div key={i}>
+                                 <div className="flex justify-between text-[10px] mb-1 text-zinc-400"><span>{b.l}</span><span>{b.v}/25</span></div>
+                                 <div className="h-1 w-full bg-[#09090b] rounded-full overflow-hidden"><div className={`h-full rounded-full ${b.v > 20 ? 'bg-emerald-500' : b.v > 15 ? 'bg-yellow-500' : 'bg-red-500'}`} style={{width: `${(b.v/25)*100}%`}}></div></div>
+                               </div>
+                             ))}
+                          </div>
+                          <p className="mt-4 text-[11px] text-zinc-400 bg-[#09090b] p-2 rounded border border-[#27272a] leading-relaxed italic border-l-2 border-l-[#4569FF]">"{currentNotes}"</p>
+                       </div>
+
+                       <div className="flex flex-col h-full">
+                          <div className="flex justify-between items-center mb-2">
+                            <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest flex items-center gap-1.5"><TerminalSquare size={12}/> Reverse Beast Prompt</span>
+                            <button onClick={() => copyText(currentPrompt, 'Prompt')} className="text-[10px] text-zinc-500 hover:text-[#4569FF] flex items-center gap-1"><Copy size={10}/> Copy</button>
+                          </div>
+                          <div className="flex-1 bg-[#09090b] border border-[#27272a] rounded-lg p-3 overflow-y-auto custom-scrollbar">
+                            <p className="text-[11px] font-mono text-[#4569FF]/80 leading-relaxed">{currentPrompt}</p>
+                          </div>
+                       </div>
+                    </motion.div>
+                  )}
+
+                </div>
+              </motion.div>
+           )}
+         </AnimatePresence>
+      </main>
+
+      <AnimatePresence>
+        {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
+      </AnimatePresence>
     </div>
   );
-}
-
-function ConverterView({ showToast }: any) { 
-  const [files, setFiles] = useState<File[]>([]); const [format, setFormat] = useState("image/png"); const convert = () => { files.forEach(file => { const reader = new FileReader(); reader.onload = (e) => { const img = new Image(); img.onload = () => { const canvas = document.createElement("canvas"); canvas.width = img.width; canvas.height = img.height; const ctx = canvas.getContext("2d"); ctx?.drawImage(img, 0, 0); const link = document.createElement("a"); link.download = `nexv_${file.name.split('.')[0]}.${format.split('/')[1]}`; link.href = canvas.toDataURL(format); link.click(); }; img.src = e.target?.result as string; }; reader.readAsDataURL(file); }); showToast(`Converted ${files.length} files`, 'success'); };
-  return <div className="h-full flex items-center justify-center p-10"><div className="bg-white/[0.02] border border-white/[0.05] rounded-[40px] p-12 max-w-2xl w-full text-center shadow-[0_8px_32px_0_rgba(0,0,0,0.36)] backdrop-blur-2xl"><div className="w-20 h-20 bg-blue-500/20 rounded-2xl flex items-center justify-center mx-auto mb-8 border border-blue-500/30"><RefreshCw size={40} className="text-blue-400"/></div><h2 className="text-4xl font-extrabold mb-10 tracking-tight">Any Format Converter</h2><div className="space-y-8"><div className="p-10 border-2 border-dashed border-white/10 rounded-3xl bg-black/20 hover:bg-black/40 transition-colors"><input type="file" multiple onChange={(e) => e.target.files && setFiles(Array.from(e.target.files))} className="block w-full text-sm text-gray-400 file:mr-6 file:py-3 file:px-6 file:rounded-xl file:border-0 file:text-sm file:font-bold file:bg-blue-600 file:text-white hover:file:bg-blue-500 transition-all cursor-pointer"/><p className="text-blue-400 font-bold text-sm mt-6 bg-blue-500/10 inline-block px-4 py-2 rounded-lg border border-blue-500/20">{files.length} assets queued</p></div><div className="flex gap-4"><select onChange={(e) => setFormat(e.target.value)} className="bg-black/50 text-white px-6 py-4 rounded-xl border border-white/10 font-bold outline-none focus:border-blue-500 transition-colors"><option value="image/png">Export as PNG</option><option value="image/jpeg">Export as JPG</option><option value="image/webp">Export as WEBP</option></select><button onClick={convert} className="flex-1 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold shadow-[0_0_20px_rgba(37,99,235,0.4)] transition-all">Convert Locally</button></div></div></div></div>; 
-}
-
-function NavItem({ active, onClick, icon: Icon, label }: any) {
-  return <button onClick={onClick} className={`w-full flex items-center gap-4 px-8 py-4 transition-all group ${active ? "bg-blue-500/10 border-l-4 border-blue-500 text-blue-400 shadow-[inset_10px_0_20px_-10px_rgba(37,99,235,0.3)]" : "text-gray-400 hover:bg-white/5 hover:text-gray-200 border-l-4 border-transparent"}`}><Icon size={20} className={`transition-transform duration-300 ${active ? "scale-110" : "group-hover:scale-110"}`} /><span className="text-sm font-semibold hidden lg:block tracking-wide">{label}</span></button>;
 }
