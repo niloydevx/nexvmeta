@@ -1,110 +1,95 @@
-import { GoogleGenerativeAI, Schema, SchemaType } from "@google/generative-ai";
 import { NextResponse } from "next/server";
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY as string);
+const ADOBE_BLACKLIST = `Apple, iPhone, iPad, MacBook, Microsoft, Windows, Google, Android, Samsung, Meta, Facebook, Instagram, Nike, Adidas, Disney, Marvel, DC, Star Wars, Pixar, 4K, 8K, Unreal Engine, V-Ray, Photorealistic.`;
 
-const ADOBE_BLACKLIST = `
-  BANNED BRANDS: Apple, iPhone, iPad, MacBook, Microsoft, Windows, Google, Android, Samsung, Galaxy, Sony, PlayStation, Xbox, Nintendo, Facebook, Meta, Instagram, TikTok, WhatsApp, Snapchat, Amazon, Netflix, Disney, YouTube, Nike, Adidas, Puma, Reebok, Gucci, Prada, Louis Vuitton, Zara, H&M, Walmart, eBay, Tesla, BMW, Mercedes, Ford, Toyota, Honda, Ferrari, Lamborghini, Porsche, Audi, Coca-Cola, Pepsi, Starbucks, McDonald's, KFC, Burger King, Red Bull, Nestlé.
-  BANNED ARTISTS: Banksy, Yayoi Kusama, KAWS, Takashi Murakami, Damien Hirst, Jeff Koons, David Hockney, Greg Rutkowski, Artgerm, Loish, WLOP, Beeple, Ross Tran, Dr. Seuss, Maurice Sendak, Beatrix Potter, Jim Henson, Frank Gehry, Zaha Hadid, Le Corbusier.
-  BANNED FRANCHISES: Marvel, DC, Iron Man, Batman, Spider-Man, Avengers, Justice League, Pixar, Mickey Mouse, Pokémon, Pikachu, Studio Ghibli, Naruto, Dragon Ball, Star Wars, Harry Potter, Game of Thrones, Barbie, James Bond.
-  BANNED TECH SPECS: 4K, 8K, Unreal Engine, V-Ray, Photorealistic, Masterpiece, Photoshop, Nikon.
-`;
+const ADOBE_CATEGORIES_PROMPT = `1=Animals, 2=Buildings, 3=Business, 4=Drinks, 5=Environment, 6=States of Mind, 7=Food, 8=Graphic Resources, 9=Hobbies, 10=Industry, 11=Landscapes, 12=Lifestyle, 13=People, 14=Plants, 15=Culture, 16=Science, 17=Social Issues, 18=Sports, 19=Technology, 20=Transport, 21=Travel.`;
 
-// Explicitly define this as type Schema to satisfy TypeScript
-const responseSchema: Schema = {
-  type: SchemaType.OBJECT,
-  properties: {
-    meta: {
-      type: SchemaType.OBJECT,
-      properties: {
-        title: { type: SchemaType.STRING },
-        description: { type: SchemaType.STRING },
-        keywords: {
-          type: SchemaType.ARRAY,
-          items: {
-            type: SchemaType.OBJECT,
-            properties: {
-              tag: { type: SchemaType.STRING },
-              relevance: { type: SchemaType.NUMBER },
-            },
-          },
-        },
-        category: { type: SchemaType.NUMBER },
-      },
+async function callGroqAPI(model: string, messages: any[], isJson: boolean = false) {
+  const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${process.env.GROQ_API_KEY}`,
+      "Content-Type": "application/json"
     },
-    technical: {
-      type: SchemaType.OBJECT,
-      properties: {
-        quality_score: { type: SchemaType.NUMBER },
-        notes: { type: SchemaType.STRING },
-      },
-    },
-    prompts: {
-      type: SchemaType.OBJECT,
-      properties: {
-        sanitized_prompt: { type: SchemaType.STRING },
-      },
-    },
-  },
-  required: ["meta", "technical", "prompts"],
-};
+    body: JSON.stringify({ model, messages, response_format: isJson ? { type: "json_object" } : undefined, temperature: 0.15 }) 
+  });
+  if (!response.ok) throw new Error(`Groq API Error: ${await response.text()}`);
+  const data = await response.json();
+  
+  const limit = response.headers.get("x-ratelimit-remaining-requests");
+  const reset = response.headers.get("x-ratelimit-reset-requests");
+  
+  return { content: data.choices[0].message.content, limit: limit ? parseInt(limit, 10) : null, reset: reset };
+}
 
 export async function POST(req: Request) {
   try {
     const { imageUrl, settings } = await req.json();
     
-    // 1. Fetch the image directly from your Supabase URL
     const imageResponse = await fetch(imageUrl);
-    if (!imageResponse.ok) throw new Error(`Supabase Fetch Failed: ${imageResponse.status}`);
-    
+    if (!imageResponse.ok) throw new Error("Failed to fetch image");
     const arrayBuffer = await imageResponse.arrayBuffer();
-    const base64Data = Buffer.from(arrayBuffer).toString("base64");
-    const mimeType = imageResponse.headers.get("content-type") || "image/jpeg";
-    
-    // 2. Initialize Model and attach the Schema
-    const model = genAI.getGenerativeModel({ 
-      model: "gemini-1.5-flash", 
-      generationConfig: { 
-        responseMimeType: "application/json",
-        responseSchema: responseSchema // Now strictly typed!
-      }
-    });
+    const base64Url = `data:${imageResponse.headers.get("content-type") || "image/jpeg"};base64,${Buffer.from(arrayBuffer).toString("base64")}`;
 
-    const resolutionPrompt = settings.resolution === "8K" 
-      ? "EXTREME DETAIL: 8k, UHD, highly detailed, sharp focus, ray tracing, unreal engine 5 render, best quality."
-      : "HIGH QUALITY: 4k, photorealistic, balanced lighting, commercial quality.";
+    const platformsTarget = settings.platforms.join(" and ");
 
-    const prompt = `
-      ROLE: ADOBE STOCK 2026 MODERATOR & METADATA EXPERT.
-      
-      STRICT SYSTEM RULES:
-      1. BLACKLIST ENFORCEMENT: Remove any words found in this list: ${ADOBE_BLACKLIST}. Replace trademarks with generic terms.
-      2. KEYWORD PRIORITY & SCORING: The first 10 keywords MUST be the most critical descriptors. Every keyword must have a relevance score from 0 to 100.
-      3. KEYWORD LIMITS: Return exactly between ${settings.keywordMin} and ${settings.keywordMax} keywords.
-      4. TITLE LOGIC: Return exactly between ${settings.titleMin} and ${settings.titleMax} chars. Human-readable sentence.
-      5. DESCRIPTION LOGIC: Return exactly between ${settings.descMin} and ${settings.descMax} chars.
-      6. HALLUCINATION CHECK: Scan for 6 fingers, mangled text, floating limbs, or severe pixel noise.
-
-      TASK 1: METADATA ENGINE
-      Generate Title, Description, and Keywords (with 0-100 scores). Determine Category (Business=7, Graphic Resources=13).
-
-      TASK 2: FILE REVIEWER
-      Score image quality (0-100). If AI errors are found, subtract 50 points and specify in notes.
-
-      TASK 3: INSPIRATION ENGINE
-      Reverse-engineer this image into a text prompt. Strip ALL artist names and copyrighted characters. Add: "${resolutionPrompt}".
-    `;
-
-    const result = await model.generateContent([
-      prompt,
-      { inlineData: { data: base64Data, mimeType: mimeType } }
+    const [maverickRes, scoutRes, guardRes] = await Promise.all([
+      callGroqAPI("meta-llama/llama-4-maverick-17b-128e-instruct", [{ role: "user", content: [{ type: "text", text: "Act as a Senior Stock QA Inspector. Conduct an extreme pixel-level forensic analysis. Calculate a precise math score (0-100) based on: 1. Micro-contrast & Lighting (25 pts), 2. Sharpness & Chromatic Aberration (25 pts), 3. Composition (25 pts), 4. Generative Artifacts (25 pts). Provide the exact calculated score and a deeply technical 1-sentence reason." }, { type: "image_url", image_url: { url: base64Url } }]}]),
+      callGroqAPI("meta-llama/llama-4-scout-17b-16e-instruct", [{ role: "user", content: [{ type: "text", text: "Reverse-engineer this image into a highly detailed text-to-image prompt. Strip copyrights." }, { type: "image_url", image_url: { url: base64Url } }]}]),
+      callGroqAPI("meta-llama/llama-guard-4-12b", [{ role: "user", content: [{ type: "text", text: "Is this image safe for a commercial stock platform? Reply SAFE or UNSAFE." }, { type: "image_url", image_url: { url: base64Url } }]}])
     ]);
 
-    // 3. Return the pre-verified JSON safely
-    return NextResponse.json(JSON.parse(result.response.text()));
+    const resolutionPrompt = settings.resolution === "8K" ? "8k, UHD, highly detailed." : "4k, photorealistic.";
+    
+    const seoRes = await callGroqAPI("llama-3.1-8b-instant", [{ role: "user", content: `
+      ROLE: MASTER STOCK AGENCY SEO ALGORITHM.
+      Forensic Data: ${maverickRes.content} | Base Prompt: ${scoutRes.content}
+      Target Platforms: ${platformsTarget}
+      
+      STRICT SEO RULES:
+      1. No blacklist words: ${ADOBE_BLACKLIST}.
+      2. 'keywords': Return EXACTLY between ${settings.keywordMin} and ${settings.keywordMax} tags. NO DUPLICATE WORDS.
+      3. 'title': Natural sentence, descriptive.
+      4. 'description': Deeply semantic SEO description.
+      5. 'category': Assign integer ID from: ${ADOBE_CATEGORIES_PROMPT}.
+      6. 'quality_score': Extract exact math score (0-100) from Forensic Data.
+      7. 'notes': Technical QA reason from Forensic Data.
+      8. 'sanitized_prompt': Reverse prompt + "${resolutionPrompt}".
+      
+      Return JSON EXACTLY: { "meta": { "title": "str", "description": "str", "keywords": [{ "tag": "str", "relevance": num }], "category": num }, "technical": { "quality_score": num, "notes": "str" }, "prompts": { "sanitized_prompt": "str" } }
+    `}], true);
 
-  } catch (error: any) {
-    console.error("API Error:", error.message);
-    return NextResponse.json({ error: error.message || "Analysis Failed" }, { status: 500 });
+    // Clean JSON markdown
+    let cleanContent = seoRes.content.replace(/```json|```/g, "").trim();
+    let parsed = JSON.parse(cleanContent);
+
+    // ==========================================
+    // BACKEND POST-PROCESSING (FORCES ENGINE RULES)
+    // ==========================================
+    if (parsed.meta) {
+       // Force Title Length Limit
+       if (parsed.meta.title && parsed.meta.title.length > settings.titleMax) {
+          parsed.meta.title = parsed.meta.title.substring(0, settings.titleMax).trim();
+       }
+       // Force Description Length Limit
+       if (parsed.meta.description && parsed.meta.description.length > settings.descMax) {
+          parsed.meta.description = parsed.meta.description.substring(0, settings.descMax).trim();
+       }
+       // Force Keyword Count Limits
+       if (parsed.meta.keywords && Array.isArray(parsed.meta.keywords)) {
+          if (parsed.meta.keywords.length > settings.keywordMax) {
+             parsed.meta.keywords = parsed.meta.keywords.slice(0, settings.keywordMax);
+          }
+       }
+    }
+
+    return NextResponse.json({ 
+      ...parsed, 
+      limit_remaining: maverickRes.limit,
+      limit_reset: maverickRes.reset
+    });
+  } catch (error) {
+    console.error(error);
+    return NextResponse.json({ error: "Analysis Failed" }, { status: 500 });
   }
 }
