@@ -27,6 +27,10 @@ export async function POST(req: Request) {
       generationConfig: { responseMimeType: "application/json" }
     });
 
+    const resolutionPrompt = settings.resolution === "8K" 
+      ? "EXTREME DETAIL: 8k, UHD, highly detailed, sharp focus, ray tracing, unreal engine 5 render, best quality."
+      : "HIGH QUALITY: 4k, photorealistic, balanced lighting, commercial quality.";
+
     const prompt = `
       ROLE: ADOBE STOCK 2026 MODERATOR & METADATA EXPERT.
       
@@ -34,8 +38,9 @@ export async function POST(req: Request) {
       1. BLACKLIST ENFORCEMENT: Remove any words found in this list: ${ADOBE_BLACKLIST}. Replace trademarks with generic terms.
       2. KEYWORD PRIORITY & SCORING: The first 10 keywords MUST be the most critical descriptors. Every keyword must have a relevance score from 0 to 100.
       3. KEYWORD LIMITS: Return exactly between ${settings.keywordMin} and ${settings.keywordMax} keywords.
-      4. TITLE LOGIC: Max ${settings.titleMax} chars. Human-readable sentence.
-      5. HALLUCINATION CHECK: Scan for 6 fingers, mangled text, floating limbs, or severe pixel noise.
+      4. TITLE LOGIC: Return exactly between ${settings.titleMin} and ${settings.titleMax} chars. Human-readable sentence.
+      5. DESCRIPTION LOGIC: Return exactly between ${settings.descMin} and ${settings.descMax} chars.
+      6. HALLUCINATION CHECK: Scan for 6 fingers, mangled text, floating limbs, or severe pixel noise.
 
       TASK 1: METADATA ENGINE
       Generate Title, Description, and Keywords (with 0-100 scores). Determine Category (Business=7, Graphic Resources=13).
@@ -44,7 +49,7 @@ export async function POST(req: Request) {
       Score image quality (0-100). If AI errors are found, subtract 50 points and specify in notes.
 
       TASK 3: INSPIRATION ENGINE
-      Reverse-engineer this image into a text prompt. Strip ALL artist names and copyrighted characters. Add "8k, UHD, highly detailed, sharp focus" for best quality generation.
+      Reverse-engineer this image into a text prompt. Strip ALL artist names and copyrighted characters. Add: "${resolutionPrompt}".
       
       RETURN STRICT JSON FORMAT EXACTLY LIKE THIS:
       {
