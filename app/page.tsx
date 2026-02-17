@@ -6,7 +6,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { 
   CloudUpload, Sparkles, CheckCircle2, 
   Trash2, Copy, Image as ImageIcon, Loader2, AlertTriangle, Download,
-  ShieldAlert, X, Activity, Layers, TerminalSquare, Settings2
+  ShieldAlert, X, Activity, Layers, TerminalSquare, Settings2, RefreshCw
 } from "lucide-react";
 
 // --- CONFIG ---
@@ -15,27 +15,14 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "sb_publishable_qkpIryzPwii4fKn6lE_baQ_EGwIO5ky"
 );
 
-// PLATFORMS
 const PLATFORMS = [
   { 
-    id: 'adobe', 
-    name: 'Adobe Stock', 
-    icon: (
-      <div className="bg-[#000000] w-9 h-9 rounded-[8px] flex items-center justify-center border border-white/10 shadow-sm shrink-0">
-        <span className="text-white font-bold text-[14px] tracking-tighter">St</span>
-      </div>
-    )
+    id: 'adobe', name: 'Adobe Stock', 
+    icon: (<div className="bg-[#000000] w-9 h-9 rounded-[8px] flex items-center justify-center border border-white/10 shadow-sm shrink-0"><span className="text-white font-bold text-[14px] tracking-tighter">St</span></div>)
   },
   { 
-    id: 'shutterstock', 
-    name: 'Shutterstock', 
-    icon: (
-      <div className="bg-[#EA3B43] w-9 h-9 rounded-[8px] flex items-center justify-center shadow-sm shrink-0">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M4 8V4m0 0h4M4 4l5 5M20 8V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5M20 16v4m0 0h-4m4 0l-5-5"/>
-        </svg>
-      </div>
-    )
+    id: 'shutterstock', name: 'Shutterstock', 
+    icon: (<div className="bg-[#EA3B43] w-9 h-9 rounded-[8px] flex items-center justify-center shadow-sm shrink-0"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M4 8V4m0 0h4M4 4l5 5M20 8V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5M20 16v4m0 0h-4m4 0l-5-5"/></svg></div>)
   }
 ];
 
@@ -78,7 +65,7 @@ export default function NexVmetaStudioPro() {
   });
 
   useEffect(() => { 
-    const savedQueue = localStorage.getItem('nexvmeta_pro_v5'); 
+    const savedQueue = localStorage.getItem('nexvmeta_pro_v6'); 
     if (savedQueue) { try { setQueue(JSON.parse(savedQueue)); } catch (e) {} } 
     
     const savedTime = localStorage.getItem('nexvmeta_limit_reset_db');
@@ -90,7 +77,7 @@ export default function NexVmetaStudioPro() {
     }
   }, []);
 
-  useEffect(() => { const savableQueue = queue.map(q => ({ ...q, file: undefined })).filter(q => q.publicUrl); localStorage.setItem('nexvmeta_pro_v5', JSON.stringify(savableQueue)); }, [queue]);
+  useEffect(() => { const savableQueue = queue.map(q => ({ ...q, file: undefined })).filter(q => q.publicUrl); localStorage.setItem('nexvmeta_pro_v6', JSON.stringify(savableQueue)); }, [queue]);
 
   useEffect(() => {
     if (!resetTimestamp) { setTimeLeft(null); return; }
@@ -159,7 +146,6 @@ export default function NexVmetaStudioPro() {
              const sMatch = data.limit_reset.match(/([\d.]+)s/);
              if (mMatch) totalSecs += parseInt(mMatch[1]) * 60;
              if (sMatch) totalSecs += Math.ceil(parseFloat(sMatch[1]));
-             
              const futureTime = Date.now() + (totalSecs * 1000);
              setResetTimestamp(futureTime);
              localStorage.setItem('nexvmeta_limit_reset_db', futureTime.toString());
@@ -169,10 +155,20 @@ export default function NexVmetaStudioPro() {
         setQueue(prev => prev.map(q => q.id === item.id ? { ...q, status: "done", result: data } : q));
         if(!selectedId) setSelectedId(item.id);
         successCount++;
-      } catch (err) { setQueue(prev => prev.map(q => q.id === item.id ? { ...q, status: "error" } : q)); }
+      } catch (err) { 
+        setQueue(prev => prev.map(q => q.id === item.id ? { ...q, status: "error" } : q)); 
+      }
+      
+      // SMART DELAY: Prevents 429 Too Many Requests by cooling down between files
+      await new Promise(resolve => setTimeout(resolve, 1500));
     }
     setProcessing(false);
     if(successCount > 0) showToast(`Generated metadata for ${successCount} assets`, 'success');
+  };
+
+  const retryFailed = () => {
+    setQueue(prev => prev.map(q => q.status === 'error' ? { ...q, status: 'idle' } : q));
+    showToast("Re-queued failed items. Press Start Engine.", 'info');
   };
 
   const exportCSV = () => {
@@ -180,16 +176,13 @@ export default function NexVmetaStudioPro() {
     if (completedItems.length === 0) return showToast("No items to export", 'error');
     if (settings.platforms.length === 0) return showToast("No platform selected", 'error');
     
-    // Multiple Export Fix with SetTimeout so Browsers don't block it
     settings.platforms.forEach((platform, index) => {
       setTimeout(() => {
         let headers: string[] = []; 
         let rows: string[] = [];
-        
         completedItems.forEach(item => {
           const safeMeta = item.result?.meta || {};
-          const safeKeywords = safeMeta.keywords || [];
-          const keywordString = safeKeywords.map((k:any) => k.tag).join(",");
+          const keywordString = (safeMeta.keywords || []).map((k:any) => k.tag).join(",");
           const title = (safeMeta.title || "Untitled").replace(/"/g, '""');
           const desc = (safeMeta.description || "").replace(/"/g, '""');
           const category = safeMeta.category || 7;
@@ -209,30 +202,30 @@ export default function NexVmetaStudioPro() {
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
-      }, index * 800); // 800ms gap between downloads
+      }, index * 800);
     });
 
-    showToast(`Exported ${settings.platforms.length} CSV file(s) safely`, 'success');
+    showToast(`Exported ${settings.platforms.length} CSV file(s)`, 'success');
   };
 
   const clearAll = () => {
      if(!confirm("Clear workspace?")) return;
      queue.forEach(item => { if (item.fileName) supabase.storage.from('nexvmeta-uploads').remove([item.fileName]).catch(console.error); });
-     setQueue([]); setSelectedId(null); localStorage.removeItem('nexvmeta_pro_v5');
+     setQueue([]); setSelectedId(null); localStorage.removeItem('nexvmeta_pro_v6');
   };
 
   const copyText = (text: string, label: string) => { navigator.clipboard.writeText(text); showToast(`${label} copied`, 'info'); };
 
   const doneCount = queue.filter(q => q.status === 'done').length;
+  const errorCount = queue.filter(q => q.status === 'error').length;
   const selectedItem = queue.find(q => q.id === selectedId);
 
-  // Fallbacks
   const safeMeta = selectedItem?.result?.meta || {};
   const safeTech = selectedItem?.result?.technical || {};
   const currentTitle = safeMeta.title || "No Title Generated";
   const currentDesc = safeMeta.description || "No Description Generated";
   const currentKeywords = safeMeta.keywords || [];
-  const currentScore = Number(safeTech.quality_score) || 85; // Bulletproof score
+  const currentScore = Number(safeTech.quality_score) || 85; 
   const currentNotes = safeTech.notes || "Forensic analysis executed successfully.";
   const currentPrompt = selectedItem?.result?.prompts?.sanitized_prompt || "No prompt generated.";
 
@@ -255,7 +248,7 @@ export default function NexVmetaStudioPro() {
         <div className="h-12 px-4 flex items-center justify-between border-b border-[#27272a]">
           <div className="flex items-center gap-2">
              <img src="/logo.png" alt="Logo" className="w-5 h-5 object-contain rounded" onError={(e) => e.currentTarget.style.display = 'none'} />
-             <span className="font-bold text-[13px] tracking-tight text-white">NexV<span className="text-[#4569FF]">meta</span></span>
+             <span className="font-bold text-[13px] tracking-tight text-white">Nexvmeta <span className="text-[#4569FF]">Pro</span></span>
           </div>
           <div className={`text-[10px] font-mono px-1.5 py-0.5 rounded border whitespace-nowrap transition-colors ${timeLeft !== null && timeLeft > 0 ? 'bg-red-500/10 text-red-400 border-red-500/30 animate-pulse' : 'bg-[#4569FF]/10 text-[#4569FF] border-[#4569FF]/20'}`}>
             {timeLeft !== null && timeLeft > 0 ? `Resets: ${formatTime(timeLeft)}` : `${apiLimit} RPD`}
@@ -291,36 +284,16 @@ export default function NexVmetaStudioPro() {
           
           <div className="space-y-3">
              <div className="flex items-center gap-1.5 mb-1 text-zinc-400"><Settings2 size={12}/><h3 className="text-[11px] font-semibold uppercase tracking-wider">Engine Rules</h3></div>
-             
-             {/* Title Rules */}
-             <div className="flex items-center justify-between">
-                <span className="text-[11px] text-zinc-400 shrink-0">Title Chars</span>
-                <div className="flex items-center gap-1 shrink-0">
-                  <input type="number" value={settings.titleMin} onChange={e => setSettings({...settings, titleMin: Number(e.target.value)})} className="w-12 h-6 bg-[#18181b] border border-[#27272a] rounded text-center text-[11px] text-zinc-300 font-mono outline-none focus:border-[#4569FF] transition-colors"/>
-                  <span className="text-zinc-600">-</span>
-                  <input type="number" value={settings.titleMax} onChange={e => setSettings({...settings, titleMax: Number(e.target.value)})} className="w-12 h-6 bg-[#18181b] border border-[#27272a] rounded text-center text-[11px] text-zinc-300 font-mono outline-none focus:border-[#4569FF] transition-colors"/>
+             {[ { label: 'Title Chars', min: 'titleMin', max: 'titleMax' }, { label: 'Desc Chars', min: 'descMin', max: 'descMax' }, { label: 'Keywords', min: 'keywordMin', max: 'keywordMax' } ].map((f, i) => (
+                <div key={i} className="flex items-center justify-between">
+                  <span className="text-[11px] text-zinc-400 shrink-0">{f.label}</span>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <input type="number" value={(settings as any)[f.min]} onChange={e => setSettings({...settings, [f.min]: +e.target.value})} className="w-12 h-6 bg-[#18181b] border border-[#27272a] rounded text-center text-[11px] text-zinc-300 font-mono outline-none focus:border-[#4569FF] transition-colors"/>
+                    <span className="text-zinc-600">-</span>
+                    <input type="number" value={(settings as any)[f.max]} onChange={e => setSettings({...settings, [f.max]: +e.target.value})} className="w-12 h-6 bg-[#18181b] border border-[#27272a] rounded text-center text-[11px] text-zinc-300 font-mono outline-none focus:border-[#4569FF] transition-colors"/>
+                  </div>
                 </div>
-             </div>
-
-             {/* Description Rules */}
-             <div className="flex items-center justify-between">
-                <span className="text-[11px] text-zinc-400 shrink-0">Desc Chars</span>
-                <div className="flex items-center gap-1 shrink-0">
-                  <input type="number" value={settings.descMin} onChange={e => setSettings({...settings, descMin: Number(e.target.value)})} className="w-12 h-6 bg-[#18181b] border border-[#27272a] rounded text-center text-[11px] text-zinc-300 font-mono outline-none focus:border-[#4569FF] transition-colors"/>
-                  <span className="text-zinc-600">-</span>
-                  <input type="number" value={settings.descMax} onChange={e => setSettings({...settings, descMax: Number(e.target.value)})} className="w-12 h-6 bg-[#18181b] border border-[#27272a] rounded text-center text-[11px] text-zinc-300 font-mono outline-none focus:border-[#4569FF] transition-colors"/>
-                </div>
-             </div>
-
-             {/* Keywords Rules */}
-             <div className="flex items-center justify-between">
-                <span className="text-[11px] text-zinc-400 shrink-0">Keywords</span>
-                <div className="flex items-center gap-1 shrink-0">
-                  <input type="number" value={settings.keywordMin} onChange={e => setSettings({...settings, keywordMin: Number(e.target.value)})} className="w-12 h-6 bg-[#18181b] border border-[#27272a] rounded text-center text-[11px] text-zinc-300 font-mono outline-none focus:border-[#4569FF] transition-colors"/>
-                  <span className="text-zinc-600">-</span>
-                  <input type="number" value={settings.keywordMax} onChange={e => setSettings({...settings, keywordMax: Number(e.target.value)})} className="w-12 h-6 bg-[#18181b] border border-[#27272a] rounded text-center text-[11px] text-zinc-300 font-mono outline-none focus:border-[#4569FF] transition-colors"/>
-                </div>
-             </div>
+             ))}
           </div>
         </div>
 
@@ -345,8 +318,16 @@ export default function NexVmetaStudioPro() {
                 <span className="text-[11px] text-zinc-500">{queue.length} files <span className="text-[#4569FF] ml-1">• {doneCount} processed</span></span>
               </div>
               <div className="flex items-center gap-2">
+                 
+                 {/* RETRY BUTTON ADDED HERE */}
+                 {errorCount > 0 && (
+                   <button onClick={retryFailed} className="h-7 px-3 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 rounded text-[11px] font-medium transition-all flex items-center gap-1.5">
+                     <RefreshCw size={12}/> Retry Failed ({errorCount})
+                   </button>
+                 )}
+
                  <button onClick={() => fileInputRef.current?.click()} className="h-7 px-3 bg-[#18181b] hover:bg-[#27272a] border border-[#27272a] rounded text-[11px] font-medium text-zinc-300 transition-all flex items-center gap-1.5"><CloudUpload size={12}/> Import</button>
-                 <button onClick={clearAll} className="h-7 px-3 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 rounded text-[11px] font-medium transition-all flex items-center gap-1.5"><Trash2 size={12}/> Clear</button>
+                 <button onClick={clearAll} className="h-7 px-3 bg-zinc-800/50 hover:bg-zinc-800 text-zinc-400 border border-zinc-700/50 rounded text-[11px] font-medium transition-all flex items-center gap-1.5"><Trash2 size={12}/> Clear</button>
               </div>
            </header>
          )}
@@ -399,7 +380,6 @@ export default function NexVmetaStudioPro() {
 
                 <div className="flex-1 overflow-y-auto custom-scrollbar pr-2">
                   
-                  {/* TAB 1: METADATA */}
                   {panelTab === 'metadata' && (
                     <motion.div initial={{opacity:0}} animate={{opacity:1}} className="flex gap-6 h-full">
                        <div className="w-40 shrink-0 h-full">
@@ -440,7 +420,6 @@ export default function NexVmetaStudioPro() {
                     </motion.div>
                   )}
 
-                  {/* TAB 2: FORENSICS */}
                   {panelTab === 'details' && (
                     <motion.div initial={{opacity:0}} animate={{opacity:1}} className="grid grid-cols-2 gap-6">
                        <div className={`p-4 rounded-lg border ${currentScore > 80 ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-red-500/5 border-red-500/20'}`}>
