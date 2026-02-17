@@ -23,6 +23,44 @@ const PLATFORMS = [
 type AnalysisResult = { meta?: { title?: string; description?: string; keywords?: { tag: string; relevance: number }[]; category?: number }; technical?: { quality_score?: number; notes?: string }; prompts?: { sanitized_prompt?: string }; limit_remaining?: number; limit_reset?: string; };
 type FileItem = { id: string; file?: File; preview: string; status: "idle" | "uploading" | "analyzing" | "done" | "error"; errorMsg?: string; result: AnalysisResult | null; publicUrl?: string; fileName?: string; name: string; progress: number; };
 
+// --- SMART AUTO-COMPRESSOR FOR UPSCALED IMAGES ---
+const compressImage = async (file: File): Promise<File> => {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = (event) => {
+      const img = new Image();
+      img.src = event.target?.result as string;
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        const MAX_WIDTH = 1920; // Caps width for AI speed and safety
+        const MAX_HEIGHT = 1920;
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > MAX_WIDTH) { height *= MAX_WIDTH / width; width = MAX_WIDTH; }
+        } else {
+          if (height > MAX_HEIGHT) { width *= MAX_HEIGHT / height; height = MAX_HEIGHT; }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        ctx?.drawImage(img, 0, 0, width, height);
+        
+        // Converts the heavily upscaled image to a fast, AI-friendly JPEG
+        canvas.toBlob((blob) => {
+          if (blob) { resolve(new File([blob], file.name, { type: "image/jpeg", lastModified: Date.now() })); } 
+          else { resolve(file); }
+        }, "image/jpeg", 0.75); 
+      };
+      img.onerror = () => resolve(file);
+    };
+    reader.onerror = () => resolve(file);
+  });
+};
+
 function Toast({ message, type, onClose }: { message: string, type: 'success'|'error'|'info', onClose: () => void }) {
   useEffect(() => { const timer = setTimeout(onClose, 3000); return () => clearTimeout(timer); }, [onClose]);
   return (
@@ -55,14 +93,14 @@ export default function NexVmetaStudioPro() {
   const [settings, setSettings] = useState({ titleMin: 20, titleMax: 100, descMin: 50, descMax: 200, keywordMin: 35, keywordMax: 49, resolution: "8K", platforms: ['adobe'] });
 
   useEffect(() => { 
-    const savedQueue = localStorage.getItem('nexvmeta_pro_v7'); 
+    const savedQueue = localStorage.getItem('nexvmeta_pro_v8'); 
     if (savedQueue) { try { setQueue(JSON.parse(savedQueue)); } catch (e) {} } 
     const savedTime = localStorage.getItem('nexvmeta_limit_reset_db');
     if (savedTime && parseInt(savedTime) > Date.now()) { setResetTimestamp(parseInt(savedTime)); setApiLimit(0); } 
     else { localStorage.removeItem('nexvmeta_limit_reset_db'); }
   }, []);
 
-  useEffect(() => { const savableQueue = queue.map(q => ({ ...q, file: undefined })).filter(q => q.publicUrl); localStorage.setItem('nexvmeta_pro_v7', JSON.stringify(savableQueue)); }, [queue]);
+  useEffect(() => { const savableQueue = queue.map(q => ({ ...q, file: undefined })).filter(q => q.publicUrl); localStorage.setItem('nexvmeta_pro_v8', JSON.stringify(savableQueue)); }, [queue]);
 
   useEffect(() => {
     if (!resetTimestamp) { setTimeLeft(null); return; }
@@ -96,11 +134,16 @@ export default function NexVmetaStudioPro() {
       try {
         setQueue(prev => prev.map(q => q.id === item.id ? { ...q, status: "analyzing", errorMsg: undefined } : q));
         
-        // Anti-Duplicate Supabase Naming Fix
+        let fileToUpload = item.file!;
+        // PREVENT API CRASH: Compress files larger than 1.5MB before sending to AI
+        if (fileToUpload.type.startsWith('image/') && fileToUpload.size > 1.5 * 1024 * 1024) {
+           fileToUpload = await compressImage(fileToUpload);
+        }
+
         const uniqueString = Math.random().toString(36).substring(2, 8);
         const fileName = `${Date.now()}-${uniqueString}-${item.file!.name.replace(/[^a-zA-Z0-9.]/g, '')}`;
         
-        const { error: uploadError } = await supabase.storage.from('nexvmeta-uploads').upload(fileName, item.file!);
+        const { error: uploadError } = await supabase.storage.from('nexvmeta-uploads').upload(fileName, fileToUpload);
         if (uploadError) throw new Error("Upload Failed: " + uploadError.message);
         
         const { data: { publicUrl } } = supabase.storage.from('nexvmeta-uploads').getPublicUrl(fileName);
@@ -131,7 +174,6 @@ export default function NexVmetaStudioPro() {
         setQueue(prev => prev.map(q => q.id === item.id ? { ...q, status: "error", errorMsg: err.message || "Analysis Failed" } : q)); 
       }
       
-      // Smart Cooldown between files to ensure 100% stability
       await new Promise(resolve => setTimeout(resolve, 2000));
     }
     setProcessing(false);
@@ -171,7 +213,7 @@ export default function NexVmetaStudioPro() {
   const clearAll = () => {
      if(!confirm("Clear workspace?")) return;
      queue.forEach(item => { if (item.fileName) supabase.storage.from('nexvmeta-uploads').remove([item.fileName]).catch(console.error); });
-     setQueue([]); setSelectedId(null); localStorage.removeItem('nexvmeta_pro_v7');
+     setQueue([]); setSelectedId(null); localStorage.removeItem('nexvmeta_pro_v8');
   };
 
   const copyText = (text: string, label: string) => { navigator.clipboard.writeText(text); showToast(`${label} copied`, 'info'); };
@@ -275,7 +317,7 @@ export default function NexVmetaStudioPro() {
                <div onClick={() => fileInputRef.current?.click()} className={`w-full max-w-xl border border-dashed rounded-xl flex flex-col items-center justify-center py-20 transition-all cursor-pointer ${isDragging ? 'bg-[#4569FF]/5 border-[#4569FF]' : 'bg-[#09090b] border-[#27272a] hover:border-zinc-500'}`}>
                   <div className="w-12 h-12 bg-[#18181b] border border-[#27272a] rounded-lg flex items-center justify-center mb-4 shadow-sm"><CloudUpload size={20} className="text-zinc-400"/></div>
                   <h2 className="text-[14px] font-bold text-zinc-200 mb-1">Drop Assets Here</h2>
-                  <p className="text-[11px] text-zinc-500 mb-6">Supports JPG, PNG, WEBP • Max 1,0000 files</p>
+                  <p className="text-[11px] text-zinc-500 mb-6">Supports JPG, PNG, WEBP • Max 1,000 files</p>
                </div>
             </div>
          ) : (
@@ -291,7 +333,7 @@ export default function NexVmetaStudioPro() {
                          <div className="absolute inset-0 bg-red-900/90 flex flex-col items-center justify-center p-2 text-center backdrop-blur-md">
                            <AlertTriangle size={16} className="text-white mb-1"/>
                            <span className="text-[10px] font-bold text-white uppercase tracking-wider mb-1">Failed</span>
-                           <span className="text-[8px] text-red-200 leading-tight line-clamp-2" title={item.errorMsg}>{item.errorMsg || "Unknown Error"}</span>
+                           <span className="text-[8px] text-red-200 leading-tight line-clamp-2" title={item.errorMsg}>{item.errorMsg || "Rate Limit hit"}</span>
                          </div>
                        )}
                        {item.status === 'done' && (<div className="absolute top-1.5 right-1.5 bg-[#09090b]/80 rounded p-0.5 backdrop-blur-md border border-white/10"><CheckCircle2 size={12} className="text-emerald-400"/></div>)}
