@@ -16,18 +16,12 @@ const supabase = createClient(
 );
 
 const PLATFORMS = [
-  { 
-    id: 'adobe', name: 'Adobe Stock', 
-    icon: (<div className="bg-[#000000] w-9 h-9 rounded-[8px] flex items-center justify-center border border-white/10 shadow-sm shrink-0"><span className="text-white font-bold text-[14px] tracking-tighter">St</span></div>)
-  },
-  { 
-    id: 'shutterstock', name: 'Shutterstock', 
-    icon: (<div className="bg-[#EA3B43] w-9 h-9 rounded-[8px] flex items-center justify-center shadow-sm shrink-0"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M4 8V4m0 0h4M4 4l5 5M20 8V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5M20 16v4m0 0h-4m4 0l-5-5"/></svg></div>)
-  }
+  { id: 'adobe', name: 'Adobe Stock', icon: (<div className="bg-[#000000] w-9 h-9 rounded-[8px] flex items-center justify-center border border-white/10 shadow-sm shrink-0"><span className="text-white font-bold text-[14px] tracking-tighter">St</span></div>) },
+  { id: 'shutterstock', name: 'Shutterstock', icon: (<div className="bg-[#EA3B43] w-9 h-9 rounded-[8px] flex items-center justify-center shadow-sm shrink-0"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M4 8V4m0 0h4M4 4l5 5M20 8V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5M20 16v4m0 0h-4m4 0l-5-5"/></svg></div>) }
 ];
 
 type AnalysisResult = { meta?: { title?: string; description?: string; keywords?: { tag: string; relevance: number }[]; category?: number }; technical?: { quality_score?: number; notes?: string }; prompts?: { sanitized_prompt?: string }; limit_remaining?: number; limit_reset?: string; };
-type FileItem = { id: string; file?: File; preview: string; status: "idle" | "uploading" | "analyzing" | "done" | "error"; result: AnalysisResult | null; publicUrl?: string; fileName?: string; name: string; progress: number; };
+type FileItem = { id: string; file?: File; preview: string; status: "idle" | "uploading" | "analyzing" | "done" | "error"; errorMsg?: string; result: AnalysisResult | null; publicUrl?: string; fileName?: string; name: string; progress: number; };
 
 function Toast({ message, type, onClose }: { message: string, type: 'success'|'error'|'info', onClose: () => void }) {
   useEffect(() => { const timer = setTimeout(onClose, 3000); return () => clearTimeout(timer); }, [onClose]);
@@ -58,48 +52,29 @@ export default function NexVmetaStudioPro() {
   const [toast, setToast] = useState<{message: string, type: 'success'|'error'|'info'} | null>(null);
   const showToast = (message: string, type: 'success'|'error'|'info' = 'info') => setToast({message, type});
 
-  const [settings, setSettings] = useState({ 
-    titleMin: 20, titleMax: 100, descMin: 50, descMax: 200, 
-    keywordMin: 35, keywordMax: 49, resolution: "8K", 
-    platforms: ['adobe'] 
-  });
+  const [settings, setSettings] = useState({ titleMin: 20, titleMax: 100, descMin: 50, descMax: 200, keywordMin: 35, keywordMax: 49, resolution: "8K", platforms: ['adobe'] });
 
   useEffect(() => { 
-    const savedQueue = localStorage.getItem('nexvmeta_pro_v6'); 
+    const savedQueue = localStorage.getItem('nexvmeta_pro_v7'); 
     if (savedQueue) { try { setQueue(JSON.parse(savedQueue)); } catch (e) {} } 
-    
     const savedTime = localStorage.getItem('nexvmeta_limit_reset_db');
-    if (savedTime && parseInt(savedTime) > Date.now()) {
-       setResetTimestamp(parseInt(savedTime));
-       setApiLimit(0);
-    } else {
-       localStorage.removeItem('nexvmeta_limit_reset_db');
-    }
+    if (savedTime && parseInt(savedTime) > Date.now()) { setResetTimestamp(parseInt(savedTime)); setApiLimit(0); } 
+    else { localStorage.removeItem('nexvmeta_limit_reset_db'); }
   }, []);
 
-  useEffect(() => { const savableQueue = queue.map(q => ({ ...q, file: undefined })).filter(q => q.publicUrl); localStorage.setItem('nexvmeta_pro_v6', JSON.stringify(savableQueue)); }, [queue]);
+  useEffect(() => { const savableQueue = queue.map(q => ({ ...q, file: undefined })).filter(q => q.publicUrl); localStorage.setItem('nexvmeta_pro_v7', JSON.stringify(savableQueue)); }, [queue]);
 
   useEffect(() => {
     if (!resetTimestamp) { setTimeLeft(null); return; }
     const interval = setInterval(() => {
       const remaining = Math.floor((resetTimestamp - Date.now()) / 1000);
-      if (remaining <= 0) {
-        setResetTimestamp(null);
-        setTimeLeft(null);
-        setApiLimit(1000);
-        localStorage.removeItem('nexvmeta_limit_reset_db');
-      } else {
-        setTimeLeft(remaining);
-      }
+      if (remaining <= 0) { setResetTimestamp(null); setTimeLeft(null); setApiLimit(1000); localStorage.removeItem('nexvmeta_limit_reset_db'); } 
+      else { setTimeLeft(remaining); }
     }, 1000);
     return () => clearInterval(interval);
   }, [resetTimestamp]);
 
-  const formatTime = (secs: number) => {
-    const m = Math.floor(secs / 60);
-    const s = Math.floor(secs % 60);
-    return `${m}m ${s}s`;
-  };
+  const formatTime = (secs: number) => { const m = Math.floor(secs / 60); const s = Math.floor(secs % 60); return `${m}m ${s}s`; };
 
   const handleFiles = (files: FileList | File[]) => {
     const newFiles = Array.from(files).map(file => ({ id: Math.random().toString(36).substr(2, 9), file, preview: URL.createObjectURL(file), name: file.name, status: "idle" as const, result: null, progress: 0, fileName: "" }));
@@ -107,14 +82,7 @@ export default function NexVmetaStudioPro() {
     showToast(`Queued ${newFiles.length} files`, 'info');
   };
 
-  const togglePlatform = (id: string) => {
-    setSettings(prev => {
-      const newPlatforms = prev.platforms.includes(id) 
-        ? prev.platforms.filter(p => p !== id) 
-        : [...prev.platforms, id];
-      return { ...prev, platforms: newPlatforms };
-    });
-  };
+  const togglePlatform = (id: string) => { setSettings(prev => { const newPlatforms = prev.platforms.includes(id) ? prev.platforms.filter(p => p !== id) : [...prev.platforms, id]; return { ...prev, platforms: newPlatforms }; }); };
 
   const runBatch = async () => {
     if (timeLeft !== null && timeLeft > 0) return showToast(`Rate Limit Active! Resets in ${formatTime(timeLeft)}`, 'error');
@@ -126,10 +94,14 @@ export default function NexVmetaStudioPro() {
     
     for (const item of pending) {
       try {
-        setQueue(prev => prev.map(q => q.id === item.id ? { ...q, status: "analyzing" } : q));
-        const fileName = `${Date.now()}-${item.file!.name.replace(/[^a-zA-Z0-9.]/g, '')}`;
+        setQueue(prev => prev.map(q => q.id === item.id ? { ...q, status: "analyzing", errorMsg: undefined } : q));
+        
+        // Anti-Duplicate Supabase Naming Fix
+        const uniqueString = Math.random().toString(36).substring(2, 8);
+        const fileName = `${Date.now()}-${uniqueString}-${item.file!.name.replace(/[^a-zA-Z0-9.]/g, '')}`;
+        
         const { error: uploadError } = await supabase.storage.from('nexvmeta-uploads').upload(fileName, item.file!);
-        if (uploadError) throw new Error(uploadError.message);
+        if (uploadError) throw new Error("Upload Failed: " + uploadError.message);
         
         const { data: { publicUrl } } = supabase.storage.from('nexvmeta-uploads').getPublicUrl(fileName);
         setQueue(prev => prev.map(q => q.id === item.id ? { ...q, publicUrl, fileName } : q));
@@ -155,19 +127,19 @@ export default function NexVmetaStudioPro() {
         setQueue(prev => prev.map(q => q.id === item.id ? { ...q, status: "done", result: data } : q));
         if(!selectedId) setSelectedId(item.id);
         successCount++;
-      } catch (err) { 
-        setQueue(prev => prev.map(q => q.id === item.id ? { ...q, status: "error" } : q)); 
+      } catch (err: any) { 
+        setQueue(prev => prev.map(q => q.id === item.id ? { ...q, status: "error", errorMsg: err.message || "Analysis Failed" } : q)); 
       }
       
-      // SMART DELAY: Prevents 429 Too Many Requests by cooling down between files
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      // Smart Cooldown between files to ensure 100% stability
+      await new Promise(resolve => setTimeout(resolve, 2000));
     }
     setProcessing(false);
     if(successCount > 0) showToast(`Generated metadata for ${successCount} assets`, 'success');
   };
 
   const retryFailed = () => {
-    setQueue(prev => prev.map(q => q.status === 'error' ? { ...q, status: 'idle' } : q));
+    setQueue(prev => prev.map(q => q.status === 'error' ? { ...q, status: 'idle', errorMsg: undefined } : q));
     showToast("Re-queued failed items. Press Start Engine.", 'info');
   };
 
@@ -178,8 +150,7 @@ export default function NexVmetaStudioPro() {
     
     settings.platforms.forEach((platform, index) => {
       setTimeout(() => {
-        let headers: string[] = []; 
-        let rows: string[] = [];
+        let headers: string[] = []; let rows: string[] = [];
         completedItems.forEach(item => {
           const safeMeta = item.result?.meta || {};
           const keywordString = (safeMeta.keywords || []).map((k:any) => k.tag).join(",");
@@ -187,31 +158,20 @@ export default function NexVmetaStudioPro() {
           const desc = (safeMeta.description || "").replace(/"/g, '""');
           const category = safeMeta.category || 7;
           
-          if(platform === 'adobe') {
-             headers = ["Filename", "Title", "Keywords", "Category", "Releases"]; 
-             rows.push([ `"${item.name}"`, `"${title}"`, `"${keywordString}"`, category, "" ].join(",")); 
-          } else if(platform === 'shutterstock') {
-             headers = ["Filename", "Description", "Keywords", "Categories", "Editorial", "Illustration"]; 
-             rows.push([ `"${item.name}"`, `"${desc}"`, `"${keywordString}"`, category, "no", "yes" ].join(","));
-          }
+          if(platform === 'adobe') { headers = ["Filename", "Title", "Keywords", "Category", "Releases"]; rows.push([ `"${item.name}"`, `"${title}"`, `"${keywordString}"`, category, "" ].join(",")); } 
+          else if(platform === 'shutterstock') { headers = ["Filename", "Description", "Keywords", "Categories", "Editorial", "Illustration"]; rows.push([ `"${item.name}"`, `"${desc}"`, `"${keywordString}"`, category, "no", "yes" ].join(",")); }
         });
-        
-        const link = document.createElement("a"); 
-        link.href = encodeURI("data:text/csv;charset=utf-8," + [headers.join(","), ...rows].join("\n")); 
-        link.download = `${platform.toUpperCase()}_Export_${Date.now()}.csv`; 
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+        const link = document.createElement("a"); link.href = encodeURI("data:text/csv;charset=utf-8," + [headers.join(","), ...rows].join("\n")); link.download = `${platform.toUpperCase()}_Export_${Date.now()}.csv`; 
+        document.body.appendChild(link); link.click(); document.body.removeChild(link);
       }, index * 800);
     });
-
     showToast(`Exported ${settings.platforms.length} CSV file(s)`, 'success');
   };
 
   const clearAll = () => {
      if(!confirm("Clear workspace?")) return;
      queue.forEach(item => { if (item.fileName) supabase.storage.from('nexvmeta-uploads').remove([item.fileName]).catch(console.error); });
-     setQueue([]); setSelectedId(null); localStorage.removeItem('nexvmeta_pro_v6');
+     setQueue([]); setSelectedId(null); localStorage.removeItem('nexvmeta_pro_v7');
   };
 
   const copyText = (text: string, label: string) => { navigator.clipboard.writeText(text); showToast(`${label} copied`, 'info'); };
@@ -231,20 +191,10 @@ export default function NexVmetaStudioPro() {
 
   return (
     <div className="flex h-screen bg-[#09090b] text-[#e4e4e7] font-sans text-[12px] antialiased overflow-hidden selection:bg-[#4569FF]/30 relative">
-      
-      <style dangerouslySetInnerHTML={{__html: `
-        .custom-scrollbar::-webkit-scrollbar { width: 5px; height: 5px; }
-        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: #27272a; border-radius: 10px; }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #3f3f46; }
-        input[type='number']::-webkit-inner-spin-button,
-        input[type='number']::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
-        input[type='number'] { -moz-appearance: textfield; }
-      `}} />
+      <style dangerouslySetInnerHTML={{__html: `.custom-scrollbar::-webkit-scrollbar { width: 5px; height: 5px; } .custom-scrollbar::-webkit-scrollbar-track { background: transparent; } .custom-scrollbar::-webkit-scrollbar-thumb { background: #27272a; border-radius: 10px; } .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #3f3f46; } input[type='number']::-webkit-inner-spin-button, input[type='number']::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; } input[type='number'] { -moz-appearance: textfield; }`}} />
 
       {/* LEFT SIDEBAR */}
       <aside className="w-[260px] bg-[#09090b] border-r border-[#27272a] flex flex-col shrink-0 z-20">
-        
         <div className="h-12 px-4 flex items-center justify-between border-b border-[#27272a]">
           <div className="flex items-center gap-2">
              <img src="/logo.png" alt="Logo" className="w-5 h-5 object-contain rounded" onError={(e) => e.currentTarget.style.display = 'none'} />
@@ -263,7 +213,6 @@ export default function NexVmetaStudioPro() {
         </div>
 
         <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-6">
-          
           <div>
             <div className="flex items-center gap-1.5 mb-2 text-zinc-400"><Layers size={12}/><h3 className="text-[11px] font-semibold uppercase tracking-wider">Target Platform</h3></div>
             <div className="grid grid-cols-2 gap-2">
@@ -279,18 +228,16 @@ export default function NexVmetaStudioPro() {
                })}
             </div>
           </div>
-
           <div className="h-px w-full bg-[#27272a]"></div>
-          
           <div className="space-y-3">
              <div className="flex items-center gap-1.5 mb-1 text-zinc-400"><Settings2 size={12}/><h3 className="text-[11px] font-semibold uppercase tracking-wider">Engine Rules</h3></div>
              {[ { label: 'Title Chars', min: 'titleMin', max: 'titleMax' }, { label: 'Desc Chars', min: 'descMin', max: 'descMax' }, { label: 'Keywords', min: 'keywordMin', max: 'keywordMax' } ].map((f, i) => (
                 <div key={i} className="flex items-center justify-between">
                   <span className="text-[11px] text-zinc-400 shrink-0">{f.label}</span>
                   <div className="flex items-center gap-1 shrink-0">
-                    <input type="number" value={(settings as any)[f.min]} onChange={e => setSettings({...settings, [f.min]: +e.target.value})} className="w-12 h-6 bg-[#18181b] border border-[#27272a] rounded text-center text-[11px] text-zinc-300 font-mono outline-none focus:border-[#4569FF] transition-colors"/>
+                    <input type="number" value={(settings as any)[f.min]} onChange={e => setSettings({...settings, [f.min]: Number(e.target.value)})} className="w-12 h-6 bg-[#18181b] border border-[#27272a] rounded text-center text-[11px] text-zinc-300 font-mono outline-none focus:border-[#4569FF] transition-colors"/>
                     <span className="text-zinc-600">-</span>
-                    <input type="number" value={(settings as any)[f.max]} onChange={e => setSettings({...settings, [f.max]: +e.target.value})} className="w-12 h-6 bg-[#18181b] border border-[#27272a] rounded text-center text-[11px] text-zinc-300 font-mono outline-none focus:border-[#4569FF] transition-colors"/>
+                    <input type="number" value={(settings as any)[f.max]} onChange={e => setSettings({...settings, [f.max]: Number(e.target.value)})} className="w-12 h-6 bg-[#18181b] border border-[#27272a] rounded text-center text-[11px] text-zinc-300 font-mono outline-none focus:border-[#4569FF] transition-colors"/>
                   </div>
                 </div>
              ))}
@@ -305,9 +252,7 @@ export default function NexVmetaStudioPro() {
       </aside>
 
       {/* RIGHT WORKSPACE */}
-      <main className="flex-1 relative flex flex-col bg-[#09090b]"
-            onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }} onDragLeave={() => setIsDragging(false)} onDrop={(e) => { e.preventDefault(); setIsDragging(false); handleFiles(e.dataTransfer.files); }}>
-         
+      <main className="flex-1 relative flex flex-col bg-[#09090b]" onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }} onDragLeave={() => setIsDragging(false)} onDrop={(e) => { e.preventDefault(); setIsDragging(false); handleFiles(e.dataTransfer.files); }}>
          <input type="file" multiple ref={fileInputRef} className="hidden" onChange={(e) => e.target.files && handleFiles(e.target.files)}/>
 
          {queue.length > 0 && (
@@ -318,14 +263,7 @@ export default function NexVmetaStudioPro() {
                 <span className="text-[11px] text-zinc-500">{queue.length} files <span className="text-[#4569FF] ml-1">• {doneCount} processed</span></span>
               </div>
               <div className="flex items-center gap-2">
-                 
-                 {/* RETRY BUTTON ADDED HERE */}
-                 {errorCount > 0 && (
-                   <button onClick={retryFailed} className="h-7 px-3 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 rounded text-[11px] font-medium transition-all flex items-center gap-1.5">
-                     <RefreshCw size={12}/> Retry Failed ({errorCount})
-                   </button>
-                 )}
-
+                 {errorCount > 0 && (<button onClick={retryFailed} className="h-7 px-3 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 rounded text-[11px] font-medium transition-all flex items-center gap-1.5"><RefreshCw size={12}/> Retry Failed ({errorCount})</button>)}
                  <button onClick={() => fileInputRef.current?.click()} className="h-7 px-3 bg-[#18181b] hover:bg-[#27272a] border border-[#27272a] rounded text-[11px] font-medium text-zinc-300 transition-all flex items-center gap-1.5"><CloudUpload size={12}/> Import</button>
                  <button onClick={clearAll} className="h-7 px-3 bg-zinc-800/50 hover:bg-zinc-800 text-zinc-400 border border-zinc-700/50 rounded text-[11px] font-medium transition-all flex items-center gap-1.5"><Trash2 size={12}/> Clear</button>
               </div>
@@ -349,7 +287,13 @@ export default function NexVmetaStudioPro() {
                        className={`relative w-28 h-28 rounded-lg overflow-hidden cursor-pointer transition-all ${selectedId === item.id ? 'border-[2px] border-[#4569FF] ring-2 ring-[#4569FF]/20 shadow-lg' : 'border border-[#27272a] hover:border-zinc-500'} bg-[#18181b]`}>
                        <img src={item.publicUrl || item.preview} className="w-full h-full object-cover"/>
                        {(item.status === 'uploading' || item.status === 'analyzing') && (<div className="absolute inset-0 bg-[#09090b]/80 flex items-center justify-center backdrop-blur-sm"><Loader2 size={16} className="text-[#4569FF] animate-spin"/></div>)}
-                       {item.status === 'error' && (<div className="absolute inset-0 bg-red-900/80 flex items-center justify-center backdrop-blur-md"><AlertTriangle size={16} className="text-white"/></div>)}
+                       {item.status === 'error' && (
+                         <div className="absolute inset-0 bg-red-900/90 flex flex-col items-center justify-center p-2 text-center backdrop-blur-md">
+                           <AlertTriangle size={16} className="text-white mb-1"/>
+                           <span className="text-[10px] font-bold text-white uppercase tracking-wider mb-1">Failed</span>
+                           <span className="text-[8px] text-red-200 leading-tight line-clamp-2" title={item.errorMsg}>{item.errorMsg || "Unknown Error"}</span>
+                         </div>
+                       )}
                        {item.status === 'done' && (<div className="absolute top-1.5 right-1.5 bg-[#09090b]/80 rounded p-0.5 backdrop-blur-md border border-white/10"><CheckCircle2 size={12} className="text-emerald-400"/></div>)}
                      </motion.div>
                    ))}
@@ -379,13 +323,9 @@ export default function NexVmetaStudioPro() {
                 </div>
 
                 <div className="flex-1 overflow-y-auto custom-scrollbar pr-2">
-                  
                   {panelTab === 'metadata' && (
                     <motion.div initial={{opacity:0}} animate={{opacity:1}} className="flex gap-6 h-full">
-                       <div className="w-40 shrink-0 h-full">
-                         <img src={selectedItem.publicUrl || selectedItem.preview} className="w-full aspect-square object-cover rounded-md border border-[#27272a] bg-[#09090b]"/>
-                       </div>
-                       
+                       <div className="w-40 shrink-0 h-full"><img src={selectedItem.publicUrl || selectedItem.preview} className="w-full aspect-square object-cover rounded-md border border-[#27272a] bg-[#09090b]"/></div>
                        <div className="flex-1 space-y-4">
                           <div>
                             <div className="flex justify-between items-center mb-1">
@@ -394,7 +334,6 @@ export default function NexVmetaStudioPro() {
                             </div>
                             <div className="p-2 bg-[#09090b] border border-[#27272a] rounded text-[12px] text-zinc-200 font-medium leading-relaxed">{currentTitle}</div>
                           </div>
-
                           <div>
                             <div className="flex justify-between items-center mb-1">
                               <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Description ({currentDesc.length}c)</span>
@@ -402,24 +341,18 @@ export default function NexVmetaStudioPro() {
                             </div>
                             <div className="p-2 bg-[#09090b] border border-[#27272a] rounded text-[11px] text-zinc-400 leading-relaxed line-clamp-2">{currentDesc}</div>
                           </div>
-
                           <div>
                             <div className="flex justify-between items-center mb-1">
                               <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Keywords ({currentKeywords.length})</span>
                               <button onClick={() => copyText(currentKeywords.map(k=>k.tag).join(', '), 'Keywords')} className="text-[10px] text-zinc-500 hover:text-[#4569FF] flex items-center gap-1"><Copy size={10}/> Copy</button>
                             </div>
                             <div className="flex flex-wrap gap-1.5 p-2 bg-[#09090b] border border-[#27272a] rounded max-h-24 overflow-y-auto custom-scrollbar">
-                              {currentKeywords.map((k, idx) => (
-                                <span key={`${k.tag}-${idx}`} className={`px-2 py-0.5 rounded-[4px] border text-[10px] font-medium ${k.relevance > 85 ? 'bg-[#4569FF]/10 border-[#4569FF]/30 text-[#4569FF]' : 'bg-[#18181b] border-[#27272a] text-zinc-400'}`}>
-                                  {k.tag}
-                                </span>
-                              ))}
+                              {currentKeywords.map((k, idx) => (<span key={`${k.tag}-${idx}`} className={`px-2 py-0.5 rounded-[4px] border text-[10px] font-medium ${k.relevance > 85 ? 'bg-[#4569FF]/10 border-[#4569FF]/30 text-[#4569FF]' : 'bg-[#18181b] border-[#27272a] text-zinc-400'}`}>{k.tag}</span>))}
                             </div>
                           </div>
                        </div>
                     </motion.div>
                   )}
-
                   {panelTab === 'details' && (
                     <motion.div initial={{opacity:0}} animate={{opacity:1}} className="grid grid-cols-2 gap-6">
                        <div className={`p-4 rounded-lg border ${currentScore > 80 ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-red-500/5 border-red-500/20'}`}>
@@ -437,28 +370,22 @@ export default function NexVmetaStudioPro() {
                           </div>
                           <p className="mt-4 text-[11px] text-zinc-400 bg-[#09090b] p-2 rounded border border-[#27272a] leading-relaxed italic border-l-2 border-l-[#4569FF]">"{currentNotes}"</p>
                        </div>
-
                        <div className="flex flex-col h-full">
                           <div className="flex justify-between items-center mb-2">
                             <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest flex items-center gap-1.5"><TerminalSquare size={12}/> Reverse Beast Prompt</span>
                             <button onClick={() => copyText(currentPrompt, 'Prompt')} className="text-[10px] text-zinc-500 hover:text-[#4569FF] flex items-center gap-1"><Copy size={10}/> Copy</button>
                           </div>
-                          <div className="flex-1 bg-[#09090b] border border-[#27272a] rounded-lg p-3 overflow-y-auto custom-scrollbar">
-                            <p className="text-[11px] font-mono text-[#4569FF]/80 leading-relaxed">{currentPrompt}</p>
-                          </div>
+                          <div className="flex-1 bg-[#09090b] border border-[#27272a] rounded-lg p-3 overflow-y-auto custom-scrollbar"><p className="text-[11px] font-mono text-[#4569FF]/80 leading-relaxed">{currentPrompt}</p></div>
                        </div>
                     </motion.div>
                   )}
-
                 </div>
               </motion.div>
            )}
          </AnimatePresence>
       </main>
 
-      <AnimatePresence>
-        {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
-      </AnimatePresence>
+      <AnimatePresence>{toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}</AnimatePresence>
     </div>
   );
 }
